@@ -9,13 +9,13 @@ uv sync
 ```
 3. Setting up hugging face inference provider (get your token [here](https://huggingface.co/docs/huggingface_hub/en/guides/cli):
 ```bash
-uv pip install -u "huggingface_hub[cli]"
+uv pip install "huggingface_hub[cli]"
 huggingface-cli login
 ```
 4. Running the GUI:
 ```bash
 BUILD_GUI=1 uv pip install -e . # only run this the first time
-are-gui -s scenario_Custom -a default --model meta-llama/Llama-3.3-70B-Instruct --provider hyperbolic --ui_view scenarios
+are-gui -s scenario_robot_farming -a default --model meta-llama/Llama-3.3-70B-Instruct --provider hyperbolic --ui_view scenarios
 ```
 
 # Meta Agents Research Environments (ARE)
