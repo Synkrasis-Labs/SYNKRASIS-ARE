@@ -140,11 +140,12 @@ const Sidebar = <T extends string>({ tabs }: SidebarProps<T>) => {
                 <MetaLogo />
                 <Stack>
                   <Typography color="#808080" fontWeight={700} lineHeight={1.2}>
-                    Agents Research
+                    {/* Agents Research */}
+                    Synkrasis Labs
                   </Typography>
-                  <Typography color="#808080" fontWeight={700} lineHeight={1.2}>
+                  {/* <Typography color="#808080" fontWeight={700} lineHeight={1.2}>
                     Environments
-                  </Typography>
+                  </Typography> */}
                 </Stack>
               </Stack>
             </motion.div>

@@ -287,6 +287,32 @@ const ScenariosHeader = () => {
                 )}
               </Stack>
             )}
+            <Stack>
+              <Typography
+                color="text.secondary"
+                fontStyle="italic"
+                variant="caption"
+              >
+                CORE Metrics (coming soon):
+              </Typography>
+              <Stack direction="row" spacing={2}>
+                <Typography variant="caption" color="text.secondary">
+                  Path Correctness:&nbsp;0.00
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Efficiency:&nbsp;0.00
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Prefix Criticality:&nbsp;0.00
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Harmful Rate:&nbsp;0.00
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  PC w/ Tau:&nbsp;0.00
+                </Typography>
+              </Stack>
+            </Stack>
           </Stack>
         </Box>
 
