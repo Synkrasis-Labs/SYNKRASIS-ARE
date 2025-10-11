@@ -1080,6 +1080,11 @@ dev = [
     { name = "typer" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pre-commit" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "autoflake", marker = "extra == 'dev'", specifier = "==2.3.1" },
@@ -1134,6 +1139,9 @@ requires-dist = [
     { name = "wsproto", specifier = "==1.2.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pre-commit", specifier = ">=2.21.0" }]
 
 [[package]]
 name = "more-itertools"

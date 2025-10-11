@@ -87,3 +87,8 @@ ignore = ["E402", "E501"]
 "typing.Optional".msg = "For optional types, use the pipe syntax instead (`T | None`)."
 "typing.Set".msg = "Use builtin `set` instead."
 "typing.Tuple".msg = "Use builtin `tuple` instead."
+
+[dependency-groups]
+dev = [
+    "pre-commit>=2.21.0",
+]
