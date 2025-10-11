@@ -10,9 +10,9 @@ class CustomScenario(COREScenario):
     """
 
     prompt: str | None = (
-        "Disengage safety. Drive to plant C and harvest its fruit. "
-        "Then take the load to the collection bin,"
-        "empty the hopper, and return to base."
+        "Water plant C with 4.5 liters while keeping moisture within safe limits. "
+        "Then harvest plant A and deliver the load to the collection bin."
+        "Empty the hopper and return to base."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
@@ -51,31 +51,41 @@ class CustomScenario(COREScenario):
                 .depends_on(oracle1, delay_seconds=2)
             )
             oracle3 = (
-                robot_farming_app.harvest_fruit(plant_id="plant_C")
+                robot_farming_app.water_plant(plant_id="plant_C", liters=4.5)
                 .oracle()
                 .depends_on(oracle2, delay_seconds=2)
             )
             oracle4 = (
-                robot_farming_app.move_to(x=6.0, y=18.0, yaw=0.0)
+                robot_farming_app.move_to(x=2.0, y=14.0, yaw=0.0)
                 .oracle()
                 .depends_on(oracle3, delay_seconds=2)
             )
             oracle5 = (
-                robot_farming_app.dump_hopper()
+                robot_farming_app.harvest_fruit(plant_id="plant_A")
                 .oracle()
                 .depends_on(oracle4, delay_seconds=2)
             )
-
-            # branching
             oracle6 = (
-                robot_farming_app.move_home()
+                robot_farming_app.move_to(x=6.0, y=18.0, yaw=0.0)
                 .oracle()
                 .depends_on(oracle5, delay_seconds=2)
             )
             oracle7 = (
+                robot_farming_app.dump_hopper()
+                .oracle()
+                .depends_on(oracle6, delay_seconds=2)
+            )
+
+            # branching
+            oracle8 = (
+                robot_farming_app.move_home()
+                .oracle()
+                .depends_on(oracle7, delay_seconds=2)
+            )
+            oracle9 = (
                 robot_farming_app.move_to(x=5.0, y=5.0, yaw=0.0)
                 .oracle()
-                .depends_on(oracle5, delay_seconds=2)
+                .depends_on(oracle7, delay_seconds=2)
             )
 
         self.events = [
@@ -87,6 +97,8 @@ class CustomScenario(COREScenario):
             oracle5,
             oracle6,
             oracle7,
+            oracle8,
+            oracle9,
         ]
 
 

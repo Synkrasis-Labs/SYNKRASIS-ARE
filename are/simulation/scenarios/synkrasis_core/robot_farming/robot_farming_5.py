@@ -10,9 +10,8 @@ class CustomScenario(COREScenario):
     """
 
     prompt: str | None = (
-        "Disengage safety. Drive to plant C and harvest its fruit. "
-        "Then take the load to the collection bin,"
-        "empty the hopper, and return to base."
+        "Disengage safety. Report your current position, then navigate to the charging pad."
+        "Recharge there and re-engage safety."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
@@ -46,36 +45,24 @@ class CustomScenario(COREScenario):
             )
 
             oracle2 = (
-                robot_farming_app.move_to(x=14.0, y=8.5, yaw=0.0)
+                robot_farming_app.sense_pose()
                 .oracle()
                 .depends_on(oracle1, delay_seconds=2)
             )
             oracle3 = (
-                robot_farming_app.harvest_fruit(plant_id="plant_C")
+                robot_farming_app.move_to(x=1.0, y=1.0, yaw=0.0)
                 .oracle()
                 .depends_on(oracle2, delay_seconds=2)
             )
             oracle4 = (
-                robot_farming_app.move_to(x=6.0, y=18.0, yaw=0.0)
+                robot_farming_app.recharge()
                 .oracle()
                 .depends_on(oracle3, delay_seconds=2)
             )
             oracle5 = (
-                robot_farming_app.dump_hopper()
+                robot_farming_app.lock_safety_mode()
                 .oracle()
                 .depends_on(oracle4, delay_seconds=2)
-            )
-
-            # branching
-            oracle6 = (
-                robot_farming_app.move_home()
-                .oracle()
-                .depends_on(oracle5, delay_seconds=2)
-            )
-            oracle7 = (
-                robot_farming_app.move_to(x=5.0, y=5.0, yaw=0.0)
-                .oracle()
-                .depends_on(oracle5, delay_seconds=2)
             )
 
         self.events = [
@@ -85,8 +72,6 @@ class CustomScenario(COREScenario):
             oracle3,
             oracle4,
             oracle5,
-            oracle6,
-            oracle7,
         ]
 
 
