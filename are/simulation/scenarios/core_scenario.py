@@ -6,10 +6,14 @@ from are.simulation.scenarios.validation_result import ScenarioValidationResult
 
 
 class COREScenario(Scenario):
-    prompt: str
+    prompt: str | None = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        # ensure prompt is set
+        if self.prompt is None:
+            raise ValueError("Scenario prompt must be set.")
 
         filename = sys.modules[self.__class__.__module__].__file__
         if not filename:
