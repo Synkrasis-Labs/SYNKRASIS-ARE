@@ -191,7 +191,6 @@ initState = RobotFarmState(
 )
 
 
-@dataclass
 class RobotFarmingApp(App):
     """
     @TODO: Update docstring

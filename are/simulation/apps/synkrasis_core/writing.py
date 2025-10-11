@@ -37,7 +37,6 @@ initState = WritingState(
 )
 
 
-@dataclass
 class WritingApp(COREApp[WritingState]):
     """
     @TODO: Update docstring
