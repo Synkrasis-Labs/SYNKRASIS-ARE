@@ -5,6 +5,7 @@
 # the root directory of this source tree.
 
 
+from . import synkrasis_core
 from .agent_user_interface import AgentUserInterface
 from .apartment_listing import ApartmentListingApp, RentAFlat
 from .app import App
@@ -42,6 +43,7 @@ __all__ = [
     "ShoppingApp",
     "SystemApp",
     "VirtualFileSystem",
+    "synkrasis_core",
 ]
 
 ALL_APPS = [
