@@ -3,7 +3,7 @@ requires = ["hatchling", "hatch-build-scripts", "hatch-requirements-txt"]
 build-backend = "hatchling.build"
 
 [project]
-name = "meta-agents-research-environments"
+name = "SYNKRASIS_ARE"
 version = "1.0.1"
 description = "Meta Agents Research Environments is a research-driven environment designed to simulate complex, real-life tasks that span several minutes and require multiple steps to be solved. Unlike static simulation environments, this platform introduces a dynamic setting where the state of the environment evolves and new information is continuously integrated."
 readme = "README.md"
