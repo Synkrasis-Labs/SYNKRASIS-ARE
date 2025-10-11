@@ -29,7 +29,7 @@ class Message:
 
 
 @dataclass
-class CommunicationsState:
+class CommunicationState:
     """
     State of the communications system.
     """
@@ -37,10 +37,10 @@ class CommunicationsState:
     messages: list[Message] = field(default_factory=list)
 
 
-initState = CommunicationsState(messages=[])
+initState = CommunicationState(messages=[])
 
 
-class CommunicationsApp(COREApp[CommunicationsState]):
+class CommunicationApp(COREApp[CommunicationState]):
     """
     A communications app demonstrating core app implementation patterns.
 
@@ -54,7 +54,7 @@ class CommunicationsApp(COREApp[CommunicationsState]):
     This app manages message communication between users.
     """
 
-    init_state: CommunicationsState = initState
+    init_state: CommunicationState = initState
 
     @type_check
     @app_tool()
