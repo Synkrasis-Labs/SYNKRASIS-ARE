@@ -9,7 +9,7 @@ class CustomScenario(COREScenario):
     @TODO: Update this docstring.
     """
 
-    prompt: str = """
+    prompt: str | None = """
     Please create a high-priority task to prepare a presentation for our client in zip code 60614 with the relevant crime rate data in the task's description.
     Also, mark the team meeting task as completed.
     """
