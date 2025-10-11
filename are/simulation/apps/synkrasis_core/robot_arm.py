@@ -5,12 +5,11 @@
 # in the root directory of this source tree.
 
 from dataclasses import dataclass
-from typing import Any
 
-from are.simulation.apps.app import App
+from are.simulation.apps.core_app import COREApp
 from are.simulation.tool_utils import OperationType, app_tool, data_tool
 from are.simulation.types import event_registered
-from are.simulation.utils import get_state_dict, type_check
+from are.simulation.utils import type_check
 
 
 @dataclass
@@ -131,39 +130,21 @@ init_state = RoboticArmState(
 # -----------------------------
 
 
-class RoboticArmApp(App):
+class RobotArmApp(COREApp[RoboticArmState]):
     """
     METΑ ARE-compatible app for a fixed-base industrial robotic arm.
     Tools mirror your original API (names, preconditions, failure texts).
     """
 
-    name: str | None = "RoboticArmApp"
-    robot_arm_state: RoboticArmState = init_state
-
-    def __init__(self):
-        super().__init__(self.name)
-
-    # ---------- Persistence ----------
-    def get_state(self) -> dict[str, Any]:
-        # persist only the state container to avoid accidental method capture
-        return get_state_dict(self, ["robot_arm_state"])
-
-    def load_state(self, state_dict: dict[str, Any]):
-        # Optional: reconstruct dataclasses if you enable persistence
-        # (left intentionally minimal for now)
-        pass
-
-    def reset(self):
-        super().reset()
-        self.robot_arm_state = init_state
+    init_state = init_state
 
     # ---------- Helpers ----------
     def _within_bounds(self, x: float, y: float, z: float) -> bool:
-        b = self.robot_arm_state.workspace_bounds
+        b = self.state.workspace_bounds
         return b.xmin <= x <= b.xmax and b.ymin <= y <= b.ymax and b.zmin <= z <= b.zmax
 
     def _in_no_go_zone(self, x: float, y: float) -> bool:
-        for rect in self.robot_arm_state.no_go_xy:
+        for rect in self.state.no_go_xy:
             if rect.xmin <= x <= rect.xmax and rect.ymin <= y <= rect.ymax:
                 return True
         return False
@@ -186,7 +167,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def unlock_safety_mode(self) -> str:
-        self.robot_arm_state.safety_mode = False
+        self.state.safety_mode = False
         return "Safety mode unlocked."
 
     @type_check
@@ -194,7 +175,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def lock_safety_mode(self) -> str:
-        self.robot_arm_state.safety_mode = True
+        self.state.safety_mode = True
         return "Safety mode locked."
 
     @type_check
@@ -209,7 +190,7 @@ class RoboticArmApp(App):
         yaw: float | None = None,
         speed: float | None = None,
     ) -> str:
-        if self.robot_arm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before moving."
 
         if not self._within_bounds(x, y, z):
@@ -218,13 +199,13 @@ class RoboticArmApp(App):
         if self._in_no_go_zone(x, y):
             return "ERROR: Target pose lies within a no-go zone."
 
-        self.robot_arm_state.pose.x = x
-        self.robot_arm_state.pose.y = y
-        self.robot_arm_state.pose.z = z
+        self.state.pose.x = x
+        self.state.pose.y = y
+        self.state.pose.z = z
         if yaw is not None:
-            self.robot_arm_state.pose.yaw = yaw
+            self.state.pose.yaw = yaw
         # speed accepted, ignored in this simulation
-        p = self.robot_arm_state.pose
+        p = self.state.pose
         return f"Moved to (x={p.x:.2f}, y={p.y:.2f}, z={p.z:.2f}, yaw={p.yaw:.2f})."
 
     @type_check
@@ -232,9 +213,9 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def move_home(self) -> str:
-        if self.robot_arm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before moving."
-        h = self.robot_arm_state.home_pose
+        h = self.state.home_pose
         return self.move_to(h.x, h.y, h.z, h.yaw)
 
     @type_check
@@ -242,7 +223,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def open_gripper(self) -> str:
-        self.robot_arm_state.gripper_closed = False
+        self.state.gripper_closed = False
         return "Gripper opened."
 
     @type_check
@@ -250,7 +231,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def close_gripper(self) -> str:
-        self.robot_arm_state.gripper_closed = True
+        self.state.gripper_closed = True
         return "Gripper closed."
 
     @type_check
@@ -258,7 +239,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def pick(self, object_name: str) -> str:
-        s = self.robot_arm_state
+        s = self.state
         if s.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before picking."
         if s.holding_object is not None:
@@ -288,7 +269,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def place(self) -> str:
-        s = self.robot_arm_state
+        s = self.state
         if s.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before placing."
         if s.holding_object is None:
@@ -315,7 +296,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
     def sense_pose(self) -> dict[str, float]:
-        p = self.robot_arm_state.pose
+        p = self.state.pose
         return {"x": p.x, "y": p.y, "z": p.z, "yaw": p.yaw}
 
     @type_check
@@ -323,7 +304,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
     def sense_gripper(self) -> str:
-        return "closed" if self.robot_arm_state.gripper_closed else "open"
+        return "closed" if self.state.gripper_closed else "open"
 
     @type_check
     @app_tool()
@@ -335,7 +316,7 @@ class RoboticArmApp(App):
                 "weight": o.weight,
                 "pose": {"x": o.pose.x, "y": o.pose.y, "z": o.pose.z},
             }
-            for name, o in self.robot_arm_state.objects.items()
+            for name, o in self.state.objects.items()
         }
 
     @type_check
@@ -343,7 +324,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
     def get_object_pose(self, object_name: str) -> dict:
-        o = self.robot_arm_state.objects.get(object_name)
+        o = self.state.objects.get(object_name)
         if o is None:
             return {"error": "Unknown object name."}
         return {"x": o.pose.x, "y": o.pose.y, "z": o.pose.z}
@@ -353,7 +334,7 @@ class RoboticArmApp(App):
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
     def get_station_pose(self, station_name: str) -> dict:
-        st = self.robot_arm_state.stations.get(station_name)
+        st = self.state.stations.get(station_name)
         if st is None:
             return {"error": "Unknown station name."}
         return {"x": st.pose.x, "y": st.pose.y, "z": st.pose.z, "yaw": st.pose.yaw}

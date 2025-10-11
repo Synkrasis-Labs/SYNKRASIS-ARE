@@ -1,5 +1,5 @@
 from are.simulation.apps.agent_user_interface import AgentUserInterface
-from are.simulation.apps.synkrasis_core.robot_arm import RoboticArmApp
+from are.simulation.apps.synkrasis_core.robot_arm import RobotArmApp
 from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.types import EventRegisterer
 
@@ -12,11 +12,11 @@ class RoboticArmScenario8(COREScenario):
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
-        self.apps = [AgentUserInterface(), RoboticArmApp()]
+        self.apps = [AgentUserInterface(), RobotArmApp()]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
-        arm = self.get_typed_app(RoboticArmApp)
+        arm = self.get_typed_app(RobotArmApp)
 
         with EventRegisterer.capture_mode():
             e0 = agui.send_message_to_agent(content=self.prompt).depends_on(
