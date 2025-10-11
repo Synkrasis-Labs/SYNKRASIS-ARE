@@ -18,7 +18,7 @@ class CustomScenario(COREScenario):
         """Initialize apps and populate with sample data"""
 
         agui = AgentUserInterface()
-        robot_farming_app = RobotFarmingApp()
+        robot_farming_app = RobotFarmingApp()  # already populated with default data
 
         # Store apps for scenario use
         self.apps = [
