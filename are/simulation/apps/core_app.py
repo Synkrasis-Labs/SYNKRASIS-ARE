@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Generic
 
 from typing_extensions import TypeVar
@@ -14,12 +15,9 @@ class COREApp(App, Generic[AppState]):
     init_state: AppState
     state: AppState
 
-    def __post_init__(self):
-        """Initialize the app - always call super().__init__()"""
-        self.name = __class__.__name__
-        self.state = self.init_state
-        super().__init__(self.name)
-        print(f"{self.name} initialized", flush=True)
+    def __init__(self):
+        self.state = copy.copy(self.init_state)
+        super().__init__()
 
     def get_state(self) -> dict[str, Any]:
         """
@@ -39,6 +37,5 @@ class COREApp(App, Generic[AppState]):
 
     def reset(self):
         """Reset app to initial state - important for scenario repeatability"""
+        self.state = copy.copy(self.init_state)
         super().reset()
-        print(f"Resetting {self.name}", flush=True)
-        self.state = self.init_state
