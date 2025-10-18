@@ -1,7 +1,4 @@
-import sys
-
 from are.simulation.scenarios.scenario import Scenario
-from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.scenarios.validation_result import ScenarioValidationResult
 
 
@@ -15,13 +12,13 @@ class COREScenario(Scenario):
         if self.prompt is None:
             raise ValueError("Scenario prompt must be set.")
 
-        filename = sys.modules[self.__class__.__module__].__file__
-        if not filename:
-            raise Exception(
-                "Could not determine module file for scenario registration."
-            )
+        # filename = sys.modules[self.__class__.__module__].__file__
+        # if not filename:
+        #     raise Exception(
+        #         "Could not determine module file for scenario registration."
+        #     )
 
-        register_scenario(filename)(self.__class__)
+        # register_scenario(filename)(self.__class__)
 
     def validate(self, env) -> ScenarioValidationResult:
         """
