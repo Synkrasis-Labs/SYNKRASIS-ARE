@@ -1,6 +1,9 @@
+import json
+import os
 import time
 from copy import copy
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import reduce
 from itertools import combinations, product
 from typing import Any, Callable
@@ -795,6 +798,109 @@ def visualize_alphabet_and_dfa(
     print("=" * 80 + "\n")
 
 
+def serialize_function_call(func_call: FunctionCall) -> dict:
+    """Serialize a FunctionCall object to dictionary for JSON output."""
+    return {
+        "name": func_call.name,
+        "arguments": {
+            arg_name: {
+                "name": arg.name,
+                "value": arg.value,
+                "excluded_values": arg.excluded_values,
+                "type": arg.type,
+            }
+            for arg_name, arg in func_call.arguments.items()
+        },
+    }
+
+
+def save_evaluation_results(
+    scenario_name: str,
+    expected_sequences: list[list[FunctionCall]],
+    agent_sequence: list[FunctionCall],
+    expected_symbol_sequences: list[list[str]],
+    agent_symbol_sequence: list[str],
+    best_distances_all: list[dict[str, float]],
+    best_sequences_all: list[dict[str, None | list[str]]],
+    harmful_rates_all: list[float],
+    prefix_criticalities_all: list[float | None],
+    efficiencies_all: list[float | None],
+    distance_algos: list[Callable],
+    output_dir: str = "evaluation_results",
+) -> str:
+    """Save evaluation results to JSON file."""
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Prepare the data structure
+    evaluation_data = {
+        "scenario_name": scenario_name,
+        "timestamp": datetime.now().isoformat(),
+        "expected_sequences": [
+            [serialize_function_call(fc) for fc in seq] for seq in expected_sequences
+        ],
+        "agent_sequence": [serialize_function_call(fc) for fc in agent_sequence],
+        "expected_symbol_sequences": expected_symbol_sequences,
+        "agent_symbol_sequence": agent_symbol_sequence,
+        "distance_algorithms": [algo.__name__ for algo in distance_algos],
+        "sequences": [],
+        "summary": {
+            "total_sequences": len(expected_sequences),
+            "avg_harmful_rate": sum(harmful_rates_all) / len(harmful_rates_all)
+            if harmful_rates_all
+            else 0,
+            "avg_efficiency": sum(e for e in efficiencies_all if e is not None)
+            / len([e for e in efficiencies_all if e is not None])
+            if any(e is not None for e in efficiencies_all)
+            else None,
+            "avg_prefix_criticality": sum(
+                p for p in prefix_criticalities_all if p is not None
+            )
+            / len([p for p in prefix_criticalities_all if p is not None])
+            if any(p is not None for p in prefix_criticalities_all)
+            else None,
+        },
+    }
+
+    # Add per-sequence results
+    for seq_index in range(len(expected_sequences)):
+        sequence_data = {
+            "sequence_index": seq_index + 1,
+            "expected_symbol_sequence": expected_symbol_sequences[seq_index],
+            "agent_symbol_sequence": agent_symbol_sequence,
+            "distance_metrics": {},
+            "harmful_rate": harmful_rates_all[seq_index],
+            "prefix_criticality": prefix_criticalities_all[seq_index],
+            "efficiency": efficiencies_all[seq_index],
+        }
+
+        # Add distance algorithm results
+        for algo in distance_algos:
+            sequence_data["distance_metrics"][algo.__name__] = {
+                "best_distance": best_distances_all[seq_index][algo.__name__],
+                "best_sequence": best_sequences_all[seq_index][algo.__name__],
+            }
+
+        evaluation_data["sequences"].append(sequence_data)
+
+    # Add algorithm-specific averages to summary
+    for algo in distance_algos:
+        avg_distance = sum(
+            best_distances_all[i][algo.__name__] for i in range(len(expected_sequences))
+        ) / len(expected_sequences)
+        evaluation_data["summary"][f"avg_{algo.__name__}_distance"] = avg_distance
+
+    # Save to file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{scenario_name}_{timestamp}.json"
+    filepath = os.path.join(output_dir, filename)
+
+    with open(filepath, "w") as f:
+        json.dump(evaluation_data, f, indent=2, default=str)
+
+    return filepath
+
+
 class COREScenario(Scenario):
     prompt: str | None = None
 
@@ -907,6 +1013,8 @@ class COREScenario(Scenario):
         harmful_rates_all: list[float] = []
         prefix_criticalities_all: list[float | None] = []
         efficiencies_all: list[float | None] = []
+        expected_symbol_sequences_all: list[list[str]] = []
+        agent_symbols_global: list[str] = []
 
         for i, seq in enumerate(expected_sequences):
             # symbol -> FunctionCall
@@ -962,6 +1070,11 @@ class COREScenario(Scenario):
             harmful_rates_all.append(harmful_rate)
             prefix_criticalities_all.append(prefix_criticality)
             efficiencies_all.append(efficiency)
+            expected_symbol_sequences_all.append(seq_symbols)
+
+            # Store agent symbols from first sequence (they should be the same for all)
+            if i == 0:
+                agent_symbols_global = agent_symbols
 
         # print unified metrics per sequence
         for seq_index in range(len(expected_sequences)):
@@ -992,6 +1105,28 @@ class COREScenario(Scenario):
                 print(f"  Efficiency = {efficiency:.4f}", flush=True)
             else:
                 print("  Efficiency = N/A", flush=True)
+
+        # Save evaluation results to JSON
+        # Use environment variable for scenario name if available, otherwise use class name
+        scenario_name = os.getenv("SCENARIO_NAME", self.__class__.__name__)
+        # Use environment variable for results directory if available
+        results_dir = os.getenv("EVALUATION_RESULTS_DIR", "evaluation_results")
+        output_filepath = save_evaluation_results(
+            scenario_name=scenario_name,
+            expected_sequences=expected_sequences,
+            agent_sequence=agent_sequence,
+            expected_symbol_sequences=expected_symbol_sequences_all,
+            agent_symbol_sequence=agent_symbols_global,
+            best_distances_all=best_distances_all,
+            best_sequences_all=best_sequences_all,
+            harmful_rates_all=harmful_rates_all,
+            prefix_criticalities_all=prefix_criticalities_all,
+            efficiencies_all=efficiencies_all,
+            distance_algos=distance_algos,
+            output_dir=results_dir,
+        )
+
+        print(f"\n📄 Evaluation results saved to: {output_filepath}", flush=True)
 
         return ScenarioValidationResult(
             success=False,

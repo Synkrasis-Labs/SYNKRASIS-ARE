@@ -1,0 +1,20 @@
+scenarios:
+  - "writing_5"
+  - "configurations_5"
+  # - "scenario_tutorial"
+  # - "scenario_find_image_file"
+  # Add more scenario names here as needed
+  # Example scenarios (uncomment and modify as needed):
+  # - "my_custom_scenario_1"
+  # - "my_custom_scenario_2"
+
+# Configuration for evaluation settings
+evaluation_settings:
+  timeout_minutes: 10
+  retry_failed: false
+
+# Model configuration (can be overridden by command line args)
+default_model:
+  name: "meta-llama/Llama-3.3-70B-Instruct"
+  provider: "hyperbolic"
+  agent: "default"

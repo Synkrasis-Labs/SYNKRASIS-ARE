@@ -1,21 +1,128 @@
 # Custom Instructions
-1. Install `uv`: just search how to
-2. Once uv is installed do:
+
+## Core Scenario Evaluation System
+
+### 1. Install `uv`
+Just search how to install `uv` for your system.
+
+### 2. Environment Setup
 ```bash
 cd SYNKRASIS-ARE
 uv venv -p 3.10
 source .venv/bin/activate
 uv sync
 ```
-3. Setting up hugging face inference provider (get your token [here](https://huggingface.co/docs/huggingface_hub/en/guides/cli):
+
+### 3. Set up Hugging Face inference provider
+Get your token [here](https://huggingface.co/docs/huggingface_hub/en/guides/cli):
 ```bash
 uv pip install "huggingface_hub[cli]"
 huggingface-cli login
 ```
-4. Running the GUI:
+
+### 4. Running Core Scenario Evaluations
+
+#### Configure Scenarios
+Edit `configs/scenarios_config.yaml` to specify which scenarios to evaluate:
+```yaml
+scenarios:
+  - "writing_5"
+  - "configurations_5"
+  # Add more scenario names here
+
+evaluation_settings:
+  timeout_minutes: 10
+  retry_failed: false
+
+default_model:
+  name: "meta-llama/Llama-3.3-70B-Instruct"
+  provider: "hyperbolic"
+  agent: "default"
+```
+
+#### Run Evaluations
+```bash
+# Use config defaults
+python3 scripts/run_evaluations.py -c configs/scenarios_config.yaml
+
+# Or override specific parameters
+python3 scripts/run_evaluations.py \
+  -c configs/scenarios_config.yaml \
+  --model meta-llama/Llama-3.3-70B-Instruct \
+  --provider hyperbolic
+```
+
+#### Example Output
+```bash
+📋 Loaded 2 scenarios from configuration
+🔧 Using model: meta-llama/Llama-3.3-70B-Instruct (provider: hyperbolic, agent: default)
+
+🚀 Starting evaluations with model: meta-llama/Llama-3.3-70B-Instruct (provider: hyperbolic)
+📁 Results will be saved to: evaluation_results/run_20251028_111355
+🚀 Running evaluation for scenario: writing_5
+✅ Successfully completed scenario: writing_5
+🚀 Running evaluation for scenario: configurations_5
+✅ Successfully completed scenario: configurations_5
+
+📊 Evaluation Summary:
+   ✅ Successful: 2
+   ❌ Failed: 0
+
+📋 Generating reports from evaluation_results/run_20251028_111355
+📂 Found 2 JSON result files
+📊 Generating CSV report: evaluation_reports/run_20251028_111355/evaluation_metrics_20251028_111355.csv
+✅ CSV report saved to: evaluation_reports/run_20251028_111355/evaluation_metrics_20251028_111355.csv
+📋 Generating summary report: evaluation_reports/run_20251028_111355/evaluation_summary_20251028_111355.txt
+✅ Summary report saved to: evaluation_reports/run_20251028_111355/evaluation_summary_20251028_111355.txt
+
+🎉 Reports generated successfully!
+   📊 CSV Report: evaluation_reports/run_20251028_111355/evaluation_metrics_20251028_111355.csv
+   📋 Summary Report: evaluation_reports/run_20251028_111355/evaluation_summary_20251028_111355.txt
+```
+
+#### Generated Reports
+
+**Summary Report** (`evaluation_summary_*.txt`):
+- Human-readable analysis with scenario breakdown
+- Symbol sequence comparisons (agent vs expected)
+- Performance metrics per sequence
+- Overall statistics and insights
+
+**CSV Report** (`evaluation_metrics_*.csv`):
+- Structured data for analysis in Excel/Python
+- Per-sequence metrics with scenario names
+- Distance algorithm results
+- Harmful rates, efficiency, and prefix criticality scores
+
+**JSON Results** (per scenario):
+- Complete evaluation data including function calls
+- Symbol sequences and alphabet mappings
+- Detailed metrics for each expected sequence
+- Timestamped for tracking
+
+#### Key Metrics Explained
+- **Path Correctness**: Sequence alignment accuracy (0-1, higher = better)
+- **NW-KTC**: Combined Needleman-Wunsch + Kendall Tau (0-1, higher = better)
+- **Harmful Rate**: Failed state ratio (0-1, lower = better)
+- **Prefix Criticality**: Early failure impact (0-1, higher = better)
+- **Efficiency**: Agent actions vs expected (>1 = more actions, <1 = fewer)
+
+### 5. Standard ARE Operations
+
+#### List available scenarios:
+```bash
+are-run --list-scenarios
+```
+
+#### Run GUI:
 ```bash
 BUILD_GUI=1 uv pip install -e . # only run this the first time
-are-gui -s scenario_robot_farming -a default --model meta-llama/Llama-3.3-70B-Instruct --provider hyperbolic --ui_view scenarios
+are-gui -s <scenario-name> -a default --model meta-llama/Llama-3.3-70B-Instruct --provider hyperbolic --ui_view scenarios
+```
+
+#### Run single evaluation:
+```bash
+are-run -s <scenario-name> -a default --model meta-llama/Llama-3.3-70B-Instruct --provider hyperbolic
 ```
 
 # Meta Agents Research Environments (ARE)
