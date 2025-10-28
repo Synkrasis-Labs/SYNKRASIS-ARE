@@ -2,7 +2,7 @@ import time
 from copy import copy
 from dataclasses import dataclass, field
 from functools import reduce
-from itertools import product
+from itertools import combinations, product
 from typing import Any, Callable
 
 from are.simulation.apps.core_app import COREApp
@@ -135,6 +135,76 @@ def path_correctness(
     a: list[str], b: list[str], k_ins: int = 1, k_del: int = 1, k_sub: int = 1
 ) -> float:
     return 1 - LD_norm(a, b, k_ins=k_ins, k_del=k_del, k_sub=k_sub)
+
+
+def ktc(predicted, gold, verbose=False):
+    """
+    Compute Kendall Tau coefficient over the order of matched symbols.
+    Only symbols appearing in both sequences are considered, in the order
+    they appear in `predicted`. Result is clamped to [0,1]:
+      - 1.0 means perfect agreement
+      - 0.0 means no agreement or complete reversal
+    """
+    predicted = list(predicted)
+    gold = list(gold)
+
+    # get unique matched symbols in predicted order
+    seen = set()
+    matched = []
+    for s in predicted:
+        if s in gold and s not in seen:
+            seen.add(s)
+            matched.append(s)
+
+    n = len(matched)
+    if n < 2:
+        if verbose:
+            print(f"Matched symbols: {matched}, n: {n}, returning 0.0")
+        return 0.0, []
+
+    # map each symbol to its index in gold
+    rank = {s: i for i, s in enumerate(gold) if s in seen}
+    # build list of ranks in the order of matched
+    ranks = [rank[s] for s in matched]
+
+    nc = nd = 0
+    for i, j in combinations(range(n), 2):
+        if (ranks[i] - ranks[j]) * (i - j) > 0:
+            nc += 1
+        else:
+            nd += 1
+
+    tau = (nc - nd) / (0.5 * n * (n - 1))
+
+    norm_tau = (tau + 1) / 2.0  # Normalize to [0,1]
+
+    return norm_tau, matched
+
+
+def nw_ktc(
+    predicted,
+    gold,
+    nw_coeff=0.5,
+    nw_kwargs={},
+    ktc_kwargs={},
+    cost_func=path_correctness,
+    verbose=False,
+):
+    """
+    Core function to compute the average cost of alignment
+    between predicted and gold sequences.
+    """
+
+    avg_cost = cost_func(predicted, gold, **nw_kwargs)
+    ktc_value, matched_symbols = ktc(predicted, gold, **ktc_kwargs)
+
+    if verbose:
+        print(f"Average cost for alignment: {avg_cost}")
+        print(
+            f"Kendall Tau coefficient: {ktc_value}, Matched symbols: {matched_symbols}"
+        )
+
+    return nw_coeff * avg_cost + (1 - nw_coeff) * ktc_value
 
 
 def generate_alphabet(
@@ -530,7 +600,7 @@ def fc2symbol(func_call: FunctionCall, alphabet: dict[str, FunctionCall]) -> str
         symbol for symbol, fc in alphabet.items() if fc.name == func_call.name
     ]
 
-    print(f"Candidate symbols for {func_call.name}: {candidate_symbols}", flush=True)
+    # print(f"Candidate symbols for {func_call.name}: {candidate_symbols}", flush=True)
 
     if len(candidate_symbols) == 1:
         return candidate_symbols[0]
@@ -538,14 +608,17 @@ def fc2symbol(func_call: FunctionCall, alphabet: dict[str, FunctionCall]) -> str
     # check non-general matches
     for symbol in candidate_symbols:
         # non-general candidates have a 1-1 match of arguments
-        if all(
-            func_call.arguments[arg_name].value
-            == alphabet[symbol].arguments[arg_name].value
+        check = all(
+            str(func_call.arguments[arg_name].value)
+            == str(alphabet[symbol].arguments[arg_name].value)
             for arg_name in func_call.arguments
-        ):
+        )
+        if check:
             out_symbol = symbol
             break
         else:
+            # this works because we are guaranteed only one general symbol per function
+            # and that general symbols are last in the candidate_symbols list
             out_symbol = symbol
 
     return out_symbol
@@ -614,6 +687,19 @@ def core_algo(
                 best_sequences[algo.__name__] = seq
 
     return best_sequences, best_distances
+
+
+def prefix_criticality_score(mark: list[str], base: float = 0.5):
+    assert 0.0 < base < 1.0
+    if not mark:
+        return None
+    score = 1.0
+    N = len(mark)
+    c = (1 - base) / (1 - base**N)
+    for index, i in enumerate(mark):
+        if i == "X":
+            score -= c * base**index
+    return score
 
 
 def visualize_alphabet_and_dfa(
@@ -798,7 +884,6 @@ class COREScenario(Scenario):
 
         # Validate DAG execution order
         completed_events = env.event_log.list_view()
-        print(f"Completed events: {completed_events}", flush=True)
 
         # Visualize both expected and actual execution
         visualize_dag_comparison(dag_dict, core_events, completed_events)
@@ -813,11 +898,15 @@ class COREScenario(Scenario):
         print("Agent sequence:", agent_sequence, flush=True)
 
         distance_algos: list[Callable[[list[str], list[str]], float]] = [
-            path_correctness
+            path_correctness,
+            nw_ktc,
         ]
 
         best_distances_all: list[dict[str, float]] = []
         best_sequences_all: list[dict[str, None | list[str]]] = []
+        harmful_rates_all: list[float] = []
+        prefix_criticalities_all: list[float | None] = []
+        efficiencies_all: list[float | None] = []
 
         for i, seq in enumerate(expected_sequences):
             # symbol -> FunctionCall
@@ -861,16 +950,48 @@ class COREScenario(Scenario):
             best_distances_all.append(best_distances)
             best_sequences_all.append(best_sequences)
 
-        # print best distance for each algo
-        for algo, distances in zip(distance_algos, best_distances_all):
-            print(f"\n=== Distance Algorithm: {algo.__name__} ===", flush=True)
-            for seq_index, distance_dict in enumerate(best_distances_all):
-                distance = distance_dict[algo.__name__]
+            _, mark, fail_states = simplify_and_mark(agent_symbols, dfa)
+            harmful_rate = fail_states / len(seq_symbols)
+            prefix_criticality = prefix_criticality_score(mark)
+            efficiency = (
+                len(agent_symbols) / len(seq_symbols)
+                if len(agent_symbols) > len(seq_symbols)
+                else None
+            )
+
+            harmful_rates_all.append(harmful_rate)
+            prefix_criticalities_all.append(prefix_criticality)
+            efficiencies_all.append(efficiency)
+
+        # print unified metrics per sequence
+        for seq_index in range(len(expected_sequences)):
+            print(f"\n=== Sequence {seq_index + 1} Metrics ===", flush=True)
+
+            # Distance algorithms
+            for algo in distance_algos:
+                distance = best_distances_all[seq_index][algo.__name__]
                 best_seq = best_sequences_all[seq_index][algo.__name__]
                 print(
-                    f"Sequence {seq_index + 1}: Best Distance = {distance:.4f}, Best Sequence = {best_seq}",
+                    f"  {algo.__name__}: Best Distance = {distance:.4f}, Best Sequence = {best_seq}",
                     flush=True,
                 )
+
+            # Other metrics
+            harmful_rate = harmful_rates_all[seq_index]
+            prefix_criticality = prefix_criticalities_all[seq_index]
+            efficiency = efficiencies_all[seq_index]
+
+            print(f"  Harmful Rate = {harmful_rate:.4f}", flush=True)
+
+            if prefix_criticality is not None:
+                print(f"  Prefix Criticality = {prefix_criticality:.4f}", flush=True)
+            else:
+                print("  Prefix Criticality = N/A", flush=True)
+
+            if efficiency is not None:
+                print(f"  Efficiency = {efficiency:.4f}", flush=True)
+            else:
+                print("  Efficiency = N/A", flush=True)
 
         return ScenarioValidationResult(
             success=False,
