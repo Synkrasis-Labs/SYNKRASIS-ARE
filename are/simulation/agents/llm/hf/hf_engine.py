@@ -63,9 +63,21 @@ class HuggingFaceLLMEngine(LLMEngine):
 
         self.model_config = model_config
 
-        # api_key will need to be parametrizable to the provider's token to be more general
-        api_key = os.getenv("HF_INFERENCE_TOKEN") or os.getenv("HF_TOKEN")
+        if (model_config.model_name.startswith("deepseek")):
+            api_key = os.getenv("DEEPSEEK_API_KEY_ARE")
+            self.client = InferenceClient(
+                bill_to=os.getenv("HF_BILL_TO") or None,
+                provider=model_config.provider,  # type: ignore
+                api_key=api_key,
+                base_url="https://api.deepseek.com"
+            )
+            return
 
+        if (model_config.model_name.startswith("gpt")):
+            api_key = os.getenv("OPENAI_API_KEY")
+        else :
+            # api_key will need to be parametrizable to the provider's token to be more general
+            api_key = os.getenv("HF_INFERENCE_TOKEN") or os.getenv("HF_TOKEN")
         self.client = InferenceClient(
             bill_to=os.getenv("HF_BILL_TO") or None,
             provider=model_config.provider,  # type: ignore
