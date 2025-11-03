@@ -1,0 +1,11 @@
+scenarios:
+  - "hit_farm_1"
+
+evaluation_settings:
+  timeout_minutes: 10
+  retry_failed: false
+
+default_model:
+  name: "meta-llama/Llama-3.3-70B-Instruct"
+  provider: "hyperbolic"
+  agent: "default"

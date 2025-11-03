@@ -35,6 +35,7 @@ def run_scenario_evaluation(
     model: str,
     provider: str,
     agent: str = "default",
+    endpoint: str | None = None,
     results_dir: str = "evaluation_results",
 ) -> bool:
     """Run evaluation for a single scenario."""
@@ -51,6 +52,10 @@ def run_scenario_evaluation(
         "--provider",
         provider,
     ]
+
+    # Optionally pass a custom endpoint to are-run
+    if endpoint:
+        cmd.extend(["--endpoint", endpoint])
 
     # Set up environment to pass scenario name and results directory to the core scenario
     env = os.environ.copy()
@@ -363,6 +368,10 @@ def main():
         "--agent", "-a", help="Agent to use (overrides config, default: default)"
     )
     parser.add_argument(
+        "--endpoint",
+        help="Custom API endpoint/base URL for the model provider (overrides config)",
+    )
+    parser.add_argument(
         "--output-dir",
         "-o",
         default="evaluation_reports",
@@ -393,6 +402,7 @@ def main():
     default_model_config = config.get("default_model", {})
     model = args.model or default_model_config.get("name")
     provider = args.provider or default_model_config.get("provider")
+    endpoint = args.endpoint or default_model_config.get("endpoint")
     agent = args.agent or default_model_config.get("agent", "default")
 
     # Validate that we have required parameters
@@ -414,7 +424,8 @@ def main():
         sys.exit(1)
 
     print(f"📋 Loaded {len(scenarios)} scenarios from configuration")
-    print(f"🔧 Using model: {model} (provider: {provider}, agent: {agent})")
+    ep_str = f", endpoint: {endpoint}" if endpoint else ""
+    print(f"🔧 Using model: {model} (provider: {provider}{ep_str}, agent: {agent})")
 
     # Create timestamped directory for this evaluation run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -423,7 +434,8 @@ def main():
 
     # Run evaluations if not skipped
     if not args.skip_evaluation:
-        print(f"\n🚀 Starting evaluations with model: {model} (provider: {provider})")
+        ep_str = f", endpoint: {endpoint}" if endpoint else ""
+        print(f"\n🚀 Starting evaluations with model: {model} (provider: {provider}{ep_str})")
         print(f"📁 Results will be saved to: {run_results_dir}")
 
         successful_runs = 0
@@ -431,7 +443,7 @@ def main():
 
         for scenario in scenarios:
             success = run_scenario_evaluation(
-                scenario, model, provider, agent, run_results_dir
+                scenario, model, provider, agent, endpoint, run_results_dir
             )
             if success:
                 successful_runs += 1
