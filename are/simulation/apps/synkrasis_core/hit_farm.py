@@ -1,12 +1,60 @@
 import numpy as np
 from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+
+from pydantic_core.core_schema import none_schema
+
 from are.simulation.apps.app import App
+from are.simulation.apps.core_app import COREApp
 from are.simulation.tool_utils import OperationType, app_tool, data_tool
 from are.simulation.types import event_registered
 from are.simulation.utils import get_state_dict, type_check
 
 
-class CentralHub(App):
+# -----------------------------
+# State dataclasses (robot_arm.py style)
+# -----------------------------
+
+
+@dataclass
+class DroneState:
+    position: tuple[float, float, float] = (0.0, 0.0, 20.0)
+    speed_mps: float = 10.0
+    consumption_rate: float = 0.5
+    battery_percentage: float = 100.0
+    pesticide_tank_ml: float = 0.0
+    camera_status: bool = False
+    flight_status: str = 'landed'
+    device_id: str | None = None
+    pesticide_tank_capacity: float | None = None
+
+
+@dataclass
+class IrrigationSystemState:
+    water_pressure_psi: float = 40.0
+    master_valve_status: bool = False
+    zone_valve_status: dict = field(default_factory=dict)
+
+
+@dataclass
+class SensorNetworkState:
+    last_reading_timestamp: datetime | None = None
+    cached_data: dict[str, dict] = field(default_factory=dict)
+
+
+@dataclass
+class CentralHubState:
+    power_grid_status: bool
+    water_supply_liters: float
+    pesticide_supply_ml: float
+    fertilizer_supply_kg: float
+    docking_stations_status: dict[str, dict] = field(default_factory=dict)
+    position: tuple[float, float, float] = (15.0, -5.0, 0.0)
+    docking_radius: float = 5.0
+    seed_inventory: dict[str, int] = field(default_factory=dict)
+
+
+class CentralHub(COREApp[CentralHubState]):
     """CentralHub (中央基地)
 
     中文: 中央基地负责管理电力、水、农药、肥料库存以及停泊设备的状态。
@@ -27,20 +75,12 @@ class CentralHub(App):
       - refill_pesticide(device_id, amount_ml): 补充农药 / refill pesticide
       - refill_fertilizer(device_id, amount_kg): 补充肥料 / refill fertilizer
     """
-    def __init__(self, power_grid_status=True, water_supply_liters=10000.0,
-                 pesticide_supply_ml=50000.0, fertilizer_supply_kg=1000.0,
-                 docking_stations_status=None, position= (15.0, -5.0, 0.0), docking_radius=5.0,
-                 seed_inventory=None):
-        super().__init__("CentralHub")
-        self.power_grid_status = power_grid_status
-        self.water_supply_liters = float(water_supply_liters)
-        self.pesticide_supply_ml = float(pesticide_supply_ml)
-        self.fertilizer_supply_kg = float(fertilizer_supply_kg)
-        self.docking_stations_status = docking_stations_status or {}
-        self.position = np.array(position, dtype=float)
-        self.docking_radius = float(docking_radius)
-        # seed_inventory keeps counts per seed type, e.g., {'corn': 1000}
-        self.seed_inventory = dict(seed_inventory or {"corn": 1000})
+    init_state: CentralHubState = CentralHubState(power_grid_status=True, water_supply_liters=10000.0,
+                                                  pesticide_supply_ml=50000.0, fertilizer_supply_kg=1000.0,
+                                                  docking_stations_status={}, position=(15.0, -5.0, 0.0),
+                                                  docking_radius=5.0,
+                                                  seed_inventory={"corn": 8000, "soybean": 2000, "wheat": 3000,
+                                                                  "rice": 3000})
 
     @type_check
     @app_tool()
@@ -57,7 +97,7 @@ class CentralHub(App):
         Returns:
             bool: True if newly registered; False if it already existed.
         """
-        if device_id in self.docking_stations_status:
+        if device_id in self.state.docking_stations_status:
             return False
         default = {
             'battery': 100.0,
@@ -65,11 +105,11 @@ class CentralHub(App):
             'pesticide_ml': 0.0,
             'fertilizer_kg': 0.0,
             'docked': False,
-            'position': tuple(self.position),
+            'position': tuple(self.state.position),
         }
         if initial_status:
             default.update(initial_status)
-        self.docking_stations_status[device_id] = default
+        self.state.docking_stations_status[device_id] = default
         return True
 
     @type_check
@@ -87,9 +127,9 @@ class CentralHub(App):
         Returns:
             str: Result message or error description.
         """
-        if device_id not in self.docking_stations_status:
+        if device_id not in self.state.docking_stations_status:
             return f"Error: device {device_id} not registered."
-        status = self.docking_stations_status[device_id]
+        status = self.state.docking_stations_status[device_id]
         current = float(status.get('battery', 0.0))
         if amount is None:
             delta = 100.0 - current
@@ -125,7 +165,7 @@ class CentralHub(App):
             This only decrements the central inventory and records a 'last_dispensed_*'
             field for the device. The caller should credit the device's seed bin.
         """
-        if device_id not in self.docking_stations_status:
+        if device_id not in self.state.docking_stations_status:
             return f"Error: device {device_id} not registered."
         try:
             requested = int(count)
@@ -133,14 +173,14 @@ class CentralHub(App):
             return "Error: count must be an integer."
         if requested <= 0:
             return "Error: count must be positive."
-        available = int(self.seed_inventory.get(seed_type, 0))
+        available = int(self.state.seed_inventory.get(seed_type, 0))
         if available <= 0:
             return f"Error: no {seed_type} seeds available in central inventory."
         dispensed = min(requested, available)
-        self.seed_inventory[seed_type] = available - dispensed
-        status = self.docking_stations_status[device_id]
+        self.state.seed_inventory[seed_type] = available - dispensed
+        status = self.state.docking_stations_status[device_id]
         status[f'last_dispensed_{seed_type}_seeds'] = dispensed
-        return f"Dispensed {dispensed} {seed_type} seeds to {device_id}. Central remaining: {self.seed_inventory[seed_type]}"
+        return f"Dispensed {dispensed} {seed_type} seeds to {device_id}. Central remaining: {self.state.seed_inventory[seed_type]}"
 
     @type_check
     @app_tool()
@@ -157,7 +197,7 @@ class CentralHub(App):
         Returns:
             str: Result message with transferred volume and remaining central water.
         """
-        if device_id not in self.docking_stations_status:
+        if device_id not in self.state.docking_stations_status:
             return f"Error: device {device_id} not registered."
         try:
             amount = float(amount_liters)
@@ -165,13 +205,13 @@ class CentralHub(App):
             return "Error: amount must be a number."
         if amount <= 0:
             return "Error: amount must be positive."
-        available = min(amount, self.water_supply_liters)
+        available = min(amount, self.state.water_supply_liters)
         if available <= 0:
             return "Error: no water available in central supply."
-        status = self.docking_stations_status[device_id]
+        status = self.state.docking_stations_status[device_id]
         status['water_liters'] = status.get('water_liters', 0.0) + available
-        self.water_supply_liters -= available
-        return f"Refilled {device_id} with {available:.2f} L water. Central remaining: {self.water_supply_liters:.2f} L."
+        self.state.water_supply_liters -= available
+        return f"Refilled {device_id} with {available:.2f} L water. Central remaining: {self.state.water_supply_liters:.2f} L."
 
     @type_check
     @app_tool()
@@ -188,7 +228,7 @@ class CentralHub(App):
         Returns:
             str: Result message with transferred volume and remaining central pesticide.
         """
-        if device_id not in self.docking_stations_status:
+        if device_id not in self.state.docking_stations_status:
             return f"Error: device {device_id} not registered."
         try:
             amount = float(amount_ml)
@@ -196,13 +236,13 @@ class CentralHub(App):
             return "Error: amount must be a number."
         if amount <= 0:
             return "Error: amount must be positive."
-        available = min(amount, self.pesticide_supply_ml)
+        available = min(amount, self.state.pesticide_supply_ml)
         if available <= 0:
             return "Error: no pesticide available in central supply."
-        status = self.docking_stations_status[device_id]
+        status = self.state.docking_stations_status[device_id]
         status['pesticide_ml'] = status.get('pesticide_ml', 0.0) + available
-        self.pesticide_supply_ml -= available
-        return f"Refilled {device_id} with {available:.2f} ml pesticide. Central remaining: {self.pesticide_supply_ml:.2f} ml."
+        self.state.pesticide_supply_ml -= available
+        return f"Refilled {device_id} with {available:.2f} ml pesticide. Central remaining: {self.state.pesticide_supply_ml:.2f} ml."
 
     @type_check
     @app_tool()
@@ -219,7 +259,7 @@ class CentralHub(App):
         Returns:
             str: Result message with transferred mass and remaining central fertilizer.
         """
-        if device_id not in self.docking_stations_status:
+        if device_id not in self.state.docking_stations_status:
             return f"Error: device {device_id} not registered."
         try:
             amount = float(amount_kg)
@@ -227,13 +267,13 @@ class CentralHub(App):
             return "Error: amount must be a number."
         if amount <= 0:
             return "Error: amount must be positive."
-        available = min(amount, self.fertilizer_supply_kg)
+        available = min(amount, self.state.fertilizer_supply_kg)
         if available <= 0:
             return "Error: no fertilizer available in central supply."
-        status = self.docking_stations_status[device_id]
+        status = self.state.docking_stations_status[device_id]
         status['fertilizer_kg'] = status.get('fertilizer_kg', 0.0) + available
-        self.fertilizer_supply_kg -= available
-        return f"Refilled {device_id} with {available:.2f} kg fertilizer. Central remaining: {self.fertilizer_supply_kg:.2f} kg."
+        self.state.fertilizer_supply_kg -= available
+        return f"Refilled {device_id} with {available:.2f} kg fertilizer. Central remaining: {self.state.fertilizer_supply_kg:.2f} kg."
 
 
 class Land:
@@ -533,7 +573,21 @@ class Drone(App):
         return f"Applied {applied:.2f} ml pesticide to {area}. Remaining tank: {self.pesticide_tank_ml:.2f} ml."
 
 
-class GroundRover(App):
+@dataclass
+class GroundRoverState:
+    position: tuple[float, float] = (0.0, 0.0)
+    battery_percentage: float = 100.0
+    water_tank_liters: float = 10.0
+    fertilizer_bin_kg: float = 50.0
+    tool_attachment_status: dict = field(default_factory=dict)
+    seed_bin: dict[str, int] = field(default_factory=dict)
+    device_id: str | None = None
+    planter_config: dict = field(default_factory=lambda: {
+        "row_spacing_cm": None, "depth_cm": None, "in_row_spacing_cm": None
+    })
+
+
+class GroundRover(COREApp[GroundRoverState]):
     """GroundRover / 地面机器人
 
     中文: 表示地面机器人，能移动、浇水、施肥、种植与收割，维护自身的电量和物料箱状态。
@@ -554,28 +608,108 @@ class GroundRover(App):
       - plant_seed(seed_type): 在当前位置种植种子
       - harvest_crop(plant_loc): 收获作物
     """
+    init_state: GroundRoverState = GroundRoverState(position=(0.0, 0.0), battery_percentage=100.0,
+                                                    water_tank_liters=10.0, fertilizer_bin_kg=5.0,
+                                                    tool_attachment_status={}, seed_bin={},
+                                                    planter_config={"row_spacing_cm": None, "depth_cm": None,
+                                                                    "in_row_spacing_cm": None})
 
-    def __init__(self, position=(0.0, 0.0), battery_percentage=100.0,
-                 water_tank_liters=10.0, fertilizer_bin_kg=5.0,
-                 tool_attachment_status=None, env=None, device_id=None, seed_bin=None):
-        super().__init__("GroundRover")
-        self.position = np.array(position, dtype=float)
-        self.battery_percentage = float(battery_percentage)
-        self.water_tank_liters = float(water_tank_liters)
-        self.fertilizer_bin_kg = float(fertilizer_bin_kg)
-        self.tool_attachment_status = tool_attachment_status or {}
+    def __init__(self, device_id, env=None):
+        super().__init__()
+        self.state.device_id = device_id
         self.env = env
-        self.device_id = device_id
-        # seed_bin keeps counts per seed type
-        self.seed_bin = dict(seed_bin or {})
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def load_seeds(self, seed_type: str, count: int):
+        """
+        Load seeds into the rover's seed bin (simulation helper).
+
+        Args:
+            seed_type (str): Seed species key.
+            count (int): Number of seeds to add.
+
+        Returns:
+            dict: Updated count for the seed type.
+        """
+        try:
+            n = int(count)
+        except Exception:
+            return {"error": "count must be integer"}
+        if n <= 0:
+            return {"error": "count must be positive"}
+        current = int(self.state.seed_bin.get(seed_type, 0))
+        self.state.seed_bin[seed_type] = current + n
+        return {"seed_type": seed_type, "count": self.state.seed_bin[seed_type]}
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def load_fertilizer(self, amount_kg: float):
+
+        """
+        Load fertilizer into the rover's fertilizer bin (simulation helper).
+        Args:
+            amount_kg (float): Kilograms of fertilizer to add.
+        Returns:
+            dict: Updated fertilizer bin count.
+        """
+        try:
+            n = float(count)
+        except Exception:
+            return {"error": "count must be integer"}
+        if n <= 0:
+            return {"error": "count must be positive"}
+        current = float(self.state.fertilizer_bin_kg)
+        self.fertilizer_bin_kg = current + n
+        return {"count": self.fertilizer_bin_kg}
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def set_planter_config(self, row_spacing_cm: float , depth_cm: float,
+                           in_row_spacing_cm: float):
+        """
+        Set or update the planter configuration parameters.
+
+        Args:
+            row_spacing_cm (float): Spacing between rows in centimeters.
+            depth_cm (float): Planting depth in centimeters.
+            in_row_spacing_cm (float): Spacing between plants within a row in centimeters
+        """
+        if row_spacing_cm is not None:
+            self.state.planter_config["row_spacing_cm"] = float(row_spacing_cm)
+        if depth_cm is not None:
+            self.state.planter_config["depth_cm"] = float(depth_cm)
+        if in_row_spacing_cm is not None:
+            self.state.planter_config["in_row_spacing_cm"] = float(in_row_spacing_cm)
+        return dict(self.state.planter_config)
 
     def _consume_battery_for_distance(self, distance_m):
         cost = distance_m * 0.02
         cost = float(cost)
-        if cost > self.battery_percentage:
+        if cost > self.state.battery_percentage:
             return False, cost
-        self.battery_percentage = max(0.0, self.battery_percentage - cost)
+        self.state.battery_percentage = max(0.0, self.state.battery_percentage - cost)
         return True, cost
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def return_to_base(self):
+        """
+        Move the rover back to the central hub position.
+
+        Returns:
+            str: Final position and battery usage, or a partial-move warning.
+        """
+        hub_pos = self.env.central_hub.state.position if self.env and self.env.central_hub else (0.0, 0.0)
+        return self.move_to(hub_pos[0], hub_pos[1])
 
     @type_check
     @app_tool()
@@ -596,20 +730,22 @@ class GroundRover(App):
             target = np.array((float(x), float(y)), dtype=float)
         except Exception:
             return "Error: invalid target coordinates."
-        distance = float(np.linalg.norm(self.position - target))
+        distance = float(np.linalg.norm(self.state.position - target))
         ok, cost = self._consume_battery_for_distance(distance)
         if not ok:
             if distance <= 0:
                 return "Error: Already at target or cannot move."
-            fraction = self.battery_percentage / max(1e-9, cost)
-            new_pos = self.position + (target - self.position) * fraction
-            self.position = new_pos
-            used = self.battery_percentage
-            self.battery_percentage = 0.0
-            return f"Warning: Insufficient battery. Moved partially to {tuple(self.position)}. Battery depleted (used {used:.2f}%)."
+            fraction = self.state.battery_percentage / max(1e-9, cost)
+            new_pos = self.state.position + (target - self.state.position) * fraction
+            # TODO
+            self.state.position = new_pos
+            used = self.state.battery_percentage
+            self.state.battery_percentage = 0.0
+            return f"Warning: Insufficient battery. Moved partially to {tuple(self.state.position)}. Battery depleted (used {used:.2f}%)."
         else:
-            self.position = target
-            return f"Moved to {tuple(self.position)}. Battery used: {cost:.2f}%. Remaining: {self.battery_percentage:.2f}%"
+            # TODO
+            self.state.position = target
+            return f"Moved to {tuple(self.state.position)}. Battery used: {cost:.2f}%. Remaining: {self.state.battery_percentage:.2f}%"
 
     def _resolve_cell(self, plant_loc):
         if plant_loc is None:
@@ -627,7 +763,8 @@ class GroundRover(App):
             return None, plant_loc
         try:
             x, y = plant_loc
-            x = int(x); y = int(y)
+            x = int(x);
+            y = int(y)
             if not self.env:
                 return None, None
             if 0 <= x < self.env.land.width and 0 <= y < self.env.land.height:
@@ -658,31 +795,30 @@ class GroundRover(App):
             return "Error: amount must be a number."
         if amount <= 0:
             return "Error: amount must be positive."
-        if self.water_tank_liters <= 0:
+        if self.state.water_tank_liters <= 0:
             return "Error: water tank empty."
         cell, plant = self._resolve_cell(plant_loc)
         if cell is None and plant is None:
             return "Error: target plant not found or env not provided."
-        applied = min(amount, self.water_tank_liters)
-        self.water_tank_liters -= applied
+        applied = min(amount, self.state.water_tank_liters)
+        self.state.water_tank_liters -= applied
         if cell is not None:
             try:
                 cell.soil_moisture = min(1.0, cell.soil_moisture + applied * 0.05)
             except Exception:
                 pass
         pos = cell.position if cell is not None else None
-        return f"Watered plant at {pos} with {applied:.2f} L. Remaining tank: {self.water_tank_liters:.2f} L."
+        return f"Watered plant at {pos} with {applied:.2f} L. Remaining tank: {self.state.water_tank_liters:.2f} L."
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def apply_fertilizer(self, plant_loc, kg):
+    def apply_fertilizer(self, kg):
         """
         Apply fertilizer to a plant/location and update local nutrient levels.
 
         Args:
-            plant_loc (tuple | GridCell | Plant): Plant or grid reference.
             kg (float): Kilograms requested to apply.
 
         Returns:
@@ -694,20 +830,12 @@ class GroundRover(App):
             return "Error: amount must be a number."
         if amount <= 0:
             return "Error: amount must be positive."
-        if self.fertilizer_bin_kg <= 0:
+        if self.state.fertilizer_bin_kg <= 0:
             return "Error: fertilizer bin empty."
-        cell, plant = self._resolve_cell(plant_loc)
-        if cell is None and plant is None:
-            return "Error: target plant not found or env not provided."
-        applied = min(amount, self.fertilizer_bin_kg)
-        self.fertilizer_bin_kg -= applied
-        if cell is not None:
-            try:
-                cell.nutrient_level['nitrogen'] = min(2.0, cell.nutrient_level.get('nitrogen', 0.0) + applied * 0.2)
-            except Exception:
-                pass
-        pos = cell.position if cell is not None else None
-        return f"Applied {applied:.3f} kg fertilizer to plant at {pos}. Remaining bin: {self.fertilizer_bin_kg:.3f} kg."
+
+        applied = min(amount, self.state.fertilizer_bin_kg)
+        self.state.fertilizer_bin_kg -= applied
+        return f"Applied {applied:.3f} kg fertilizer to plant . Remaining bin: {self.state.fertilizer_bin_kg:.3f} kg."
 
     @type_check
     @app_tool()
@@ -723,23 +851,22 @@ class GroundRover(App):
         Returns:
             str: Result message or error if bin is empty, env is missing, or cell is occupied.
         """
-        # Check seed availability first
-        available = int(self.seed_bin.get(seed_type, 0))
+        available = int(self.state.seed_bin.get(seed_type, 0))
         if available <= 0:
             return f"Error: no {seed_type} seeds in bin."
-        if not self.env:
-            return "Error: env not available to plant seeds."
-        x, y = int(round(float(self.position[0]))), int(round(float(self.position[1])))
-        if not (0 <= x < self.env.land.width and 0 <= y < self.env.land.height):
-            return "Error: current position out of land bounds."
-        cell = self.env.land.grid[x][y]
-        if cell.plant is not None:
-            return f"Error: grid {cell.position} already has a plant."
-        new_plant = Plant(species=seed_type, planting_date=self.env.time)
-        cell.plant = new_plant
+        # if not self.env:
+        #     return "Error: env not available to plant seeds."
+        # x, y = int(round(float(self.state.position[0]))), int(round(float(self.state.position[1])))
+        # if not (0 <= x < self.env.land.width and 0 <= y < self.env.land.height):
+        #     return "Error: current position out of land bounds."
+        # cell = self.env.land.grid[x][y]
+        # if cell.plant is not None:
+        #     return f"Error: grid {cell.position} already has a plant."
+        # new_plant = Plant(species=seed_type, planting_date=self.env.time)
+        # cell.plant = new_plant
         # decrement seed bin
-        self.seed_bin[seed_type] = available - 1
-        return f"Planted seed '{seed_type}' at {cell.position}. Remaining {seed_type} seeds: {self.seed_bin[seed_type]}"
+        self.state.seed_bin[seed_type] = available - 1
+        return f"Planted seed '{seed_type}'. Remaining {seed_type} seeds: {self.state.seed_bin[seed_type]}"
 
     @type_check
     @app_tool()
@@ -888,6 +1015,14 @@ class SensorNetwork(App):
         self.last_reading_timestamp = None
         self.cached_data = {}
         self.env = env
+        self.zone_depths = {
+            "B1": 2.0,
+        }
+
+    def update_depth(self, zone_id):
+
+        self.zone_depths[zone_id] = 3.0
+        return True
 
     @type_check
     @app_tool()
@@ -921,6 +1056,24 @@ class SensorNetwork(App):
         if 0 <= xi < self.env.land.width and 0 <= yi < self.env.land.height:
             return self.env.land.grid[xi][yi]
         return None
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def get_water_depth(self,zone_id:str):
+        """
+        Return water depth at the specified irrigation zone.
+
+        Args:
+            zone_id (str): Zone identifier.
+
+        Returns:
+            float | None: Water depth in cm, or None if unavailable.
+        """
+
+        return self.zone_depths.get(zone_id, None)
+
 
     @type_check
     @app_tool()
@@ -1082,35 +1235,101 @@ class HitFarmState(App):
             'A3': {'size': (24, 24), 'origin': (70, 0)},
             'A4': {'size': (40, 20), 'origin': (0, 32)},
             'A5': {'size': (30, 30), 'origin': (42, 32)},
+            # Additional blocks to support scenarios B/C/D
+            'B1': {'size': (28, 28), 'origin': (75, 32)},
+            'B2': {'size': (28, 24), 'origin': (105, 32)},
+            'C1': {'size': (30, 26), 'origin': (75, 62)},
+            'D1': {'size': (30, 26), 'origin': (0, 62)},
+            'D2': {'size': (30, 26), 'origin': (35, 62)},
         }
         self.lands: dict[str, Land] = {
             lid: Land(name=lid, width=meta['size'][0], height=meta['size'][1], origin=meta['origin'])
             for lid, meta in self.land_layout.items()
         }
-        # Backward-compat alias for legacy code expecting a single land
-        self.land = self.lands['A1']
 
-        # ---- Subsystems ----
-        self.drone = Drone(initial_pos=(0.0, 0.0, 20.0), speed_mps=15.0, consumption_rate=0.5,
-                           battery_percentage=100.0, pesticide_tank_ml=0.0, camera_status=False)
-        self.rover = GroundRover(position=(0.0, 0.0), env=self, device_id='rover-1')
+        # ---- Subsystems (registered later; allow multiples) ----
+        self.drones: list[Drone] = []
+        self.rovers: list[GroundRover] = []
+        self.central_hubs: list[CentralHub] = []
+        self.irrigation_systems: list[IrrigationSystem] = []
+        self.sensor_networks: list[SensorNetwork] = []
 
-        # Explicit CentralHub position (can be reconfigured later)
+        # Default hub position when no hub registered yet
         self.hub_position = (15.0, -5.0, 0.0)
-        self.central_hub = CentralHub(position=self.hub_position, docking_radius=5.0)
-
-        self.irrigation_system = IrrigationSystem()
-        self.sensor_network = SensorNetwork(env=self)
 
         # Timekeeping
         self.time = datetime(2024, 6, 1, 6, 0, 0, tzinfo=timezone.utc)
         self.time_step = timedelta(minutes=1)
 
-        # Ensure rover registered at hub
-        self.central_hub.register_device(self.rover.device_id)
+        # No implicit coupling/registration here; handled by register_* methods
+
+    # ---- Registration API (supports multiple instances) ----
+    def register_drone(self, drone: Drone) -> None:
+        self.drones.append(drone)
+
+    def register_rover(self, rover: GroundRover) -> None:
+        try:
+            rover.env = self
+        except Exception:
+            pass
+        self.rovers.append(rover)
+        # Optionally register device with first hub if available
+        if self.central_hubs and getattr(rover, 'device_id', None):
+            try:
+                self.central_hubs[0].register_device(rover.state.device_id)
+            except Exception:
+                pass
+
+    def register_central_hub(self, hub: CentralHub) -> None:
+        self.central_hubs.append(hub)
+        try:
+            self.hub_position = tuple(hub.state.position)
+        except Exception:
+            pass
+        # Optionally register existing rovers
+        for r in self.rovers:
+            if getattr(r, 'device_id', None):
+                try:
+                    hub.register_device(r.state.device_id)
+                except Exception:
+                    pass
+
+    def register_irrigation_system(self, irrigation: IrrigationSystem) -> None:
+        self.irrigation_systems.append(irrigation)
+
+    def register_sensor_network(self, sensors: SensorNetwork) -> None:
+        try:
+            sensors.env = self
+        except Exception:
+            pass
+        self.sensor_networks.append(sensors)
+
+    # ---- Backward-compat convenience properties (first instance or None) ----
+    @property
+    def drone(self):
+        return self.drones[0] if self.drones else None
+
+    @property
+    def rover(self):
+        return self.rovers[0] if self.rovers else None
+
+    @property
+    def central_hub(self):
+        return self.central_hubs[0] if self.central_hubs else None
+
+    @property
+    def irrigation_system(self):
+        return self.irrigation_systems[0] if self.irrigation_systems else None
+
+    @property
+    def sensor_network(self):
+        return self.sensor_networks[0] if self.sensor_networks else None
 
         # ---- Single-crop policy per land; plant a few GridCells so each land has Plants ----
-        per_land_species = {'A1': 'soybean', 'A2': 'corn', 'A3': 'wheat', 'A4': 'corn', 'A5': 'soybean'}
+        per_land_species = {
+            'A1': 'soybean', 'A2': 'corn', 'A3': 'wheat', 'A4': 'corn', 'A5': 'soybean',
+            'B1': 'rice', 'B2': 'rice', 'C1': 'soybean', 'D1': 'wheat', 'D2': 'wheat'
+        }
         for lid, land in self.lands.items():
             land.set_default_species(per_land_species.get(lid, 'soybean'))
             w, h = land.width, land.height
@@ -1191,24 +1410,30 @@ class HitFarmState(App):
             'time': self.time.isoformat(),
             'land_shape': (self.lands['A1'].width, self.lands['A1'].height),  # backward-compatible
             'lands': lands_state,
-            'drone': {
-                'position': tuple(self.drone.position),
-                'battery': self.drone.battery_percentage,
-                'pesticide_tank_ml': self.drone.pesticide_tank_ml,
-                'flight_status': self.drone.flight_status,
-            },
-            'rover': {
-                'position': tuple(self.rover.position),
-                'battery': getattr(self.rover, 'battery_percentage', None),
-            },
-            'central_hub': {
-                'position': tuple(self.hub_position),
-                'power_grid_status': self.central_hub.power_grid_status,
-                'water_supply_liters': self.central_hub.water_supply_liters,
-                'pesticide_supply_ml': self.central_hub.pesticide_supply_ml,
-                'fertilizer_supply_kg': self.central_hub.fertilizer_supply_kg,
-                'docking_stations_status': self.central_hub.docking_stations_status,
-            }
+            'drone': (
+                {
+                    'position': tuple(self.drone.position),
+                    'battery': self.drone.battery_percentage,
+                    'pesticide_tank_ml': self.drone.pesticide_tank_ml,
+                    'flight_status': self.drone.flight_status,
+                } if self.drone is not None else None
+            ),
+            'rover': (
+                {
+                    'position': tuple(self.rover.state.position),
+                    'battery': getattr(self.rover, 'battery_percentage', None),
+                } if self.rover is not None else None
+            ),
+            'central_hub': (
+                {
+                    'position': tuple(self.hub_position),
+                    'power_grid_status': self.central_hub.state.power_grid_status,
+                    'water_supply_liters': self.central_hub.state.water_supply_liters,
+                    'pesticide_supply_ml': self.central_hub.state.pesticide_supply_ml,
+                    'fertilizer_supply_kg': self.central_hub.state.fertilizer_supply_kg,
+                    'docking_stations_status': self.central_hub.state.docking_stations_status,
+                } if self.central_hub is not None else None
+            )
         }
 
     def layout_diagram(self) -> str:
@@ -1226,48 +1451,68 @@ class HitFarmState(App):
         min_y = min(o[1] for o in origins.values())
         row1 = [lid for lid, o in origins.items() if o[1] <= min_y + 1]
         row2 = [lid for lid in self.lands if lid not in row1]
+
         def box(land: Land):
             return f"[{land.name} {land.width}x{land.height} @O{land.origin}]"
+
         if row1:
             lines.append("  ".join(box(self.lands[lid]) for lid in sorted(row1)))
         if row2:
             lines.append("  ".join(box(self.lands[lid]) for lid in sorted(row2)))
         return "\n".join(lines)
 
+    # @type_check
+    # @app_tool()
+    # @data_tool()
+    # @event_registered(operation_type=OperationType.READ)
+    # def get_land_coordinates(self, land_name: str) -> dict:
+    #     """
+    #     Get world‑grid coordinates and bounds for a land by name.
+    #     Args:
+    #         land_name (str): Land identifier, e.g., 'A1' ~ 'A5'.
+    #
+    #     Returns:
+    #         dict: A mapping with keys:
+    #             - name: land id
+    #             - origin: (x0, y0) world-grid origin (top-left cell)
+    #             - size: (width, height)
+    #             - bbox: {'min': (x_min, y_min), 'max': (x_max, y_max)} inclusive bounds in world grid
+    #             - center: (cx, cy) center cell in world grid (integer)
+    #             If the land is not found, returns {'error': str}.
+    #     """
+    #     lid = str(land_name)
+    #     land = self.lands.get(lid)
+    #     if land is None:
+    #         return {"error": f"Land {land_name} not found"}
+    #     x0, y0 = land.origin
+    #     w, h = land.width, land.height
+    #     bbox_min = (x0, y0)
+    #     bbox_max = (x0 + w - 1, y0 + h - 1)
+    #     center = (x0 + w // 2, y0 + h // 2)
+    #     return {
+    #         'name': land.name,
+    #         'origin': (x0, y0),
+    #         'size': (w, h),
+    #         'bbox': {'min': bbox_min, 'max': bbox_max},
+    #         'center': center,
+    #     }
+
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_land_coordinates(self, land_name: str) -> dict:
+    def get_coordinates(self, land_name: str) -> str | tuple[int, int]:
         """
-        Get world‑grid coordinates and bounds for a land by name.
+        Get world‑grid coordinates for a land by name.
         Args:
-            land_name (str): Land identifier, e.g., 'A1' ~ 'A5'.
+            land_name (str): Land identifier, e.g., A1
 
         Returns:
-            dict: A mapping with keys:
-                - name: land id
-                - origin: (x0, y0) world-grid origin (top-left cell)
-                - size: (width, height)
-                - bbox: {'min': (x_min, y_min), 'max': (x_max, y_max)} inclusive bounds in world grid
-                - center: (cx, cy) center cell in world grid (integer)
-                If the land is not found, returns {'error': str}.
+            tuple: world‑grid coordinate (x0, y0)
+            str:   If the land is not found, returns str.
         """
         lid = str(land_name)
         land = self.lands.get(lid)
         if land is None:
-            return {"error": f"Land {land_name} not found"}
-        x0, y0 = land.origin
-        w, h = land.width, land.height
-        bbox_min = (x0, y0)
-        bbox_max = (x0 + w - 1, y0 + h - 1)
-        center = (x0 + w // 2, y0 + h // 2)
-        return {
-            'name': land.name,
-            'origin': (x0, y0),
-            'size': (w, h),
-            'bbox': {'min': bbox_min, 'max': bbox_max},
-            'center': center,
-        }
-
-    # end of file
+            return f"Land {land_name} not found"
+        return land.origin
