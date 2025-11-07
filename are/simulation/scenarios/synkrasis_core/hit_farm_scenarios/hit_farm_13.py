@@ -2,7 +2,6 @@ from are.simulation.apps.agent_user_interface import AgentUserInterface
 from are.simulation.apps.synkrasis_core.hit_farm import HitFarmState, GroundRover, IrrigationSystem, SensorNetwork, \
     CentralHub
 from are.simulation.scenarios.core_scenario import COREScenario
-from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
 
@@ -23,7 +22,7 @@ class CustomScenario(COREScenario):
         hub = CentralHub()
         irrigation = IrrigationSystem()
 
-        sensors = SensorNetwork(env=None)
+        sensors = SensorNetwork(farm_state=state)
         state.register_rover(rover)
         state.register_central_hub(hub)
         state.register_irrigation_system(irrigation)
@@ -42,16 +41,13 @@ class CustomScenario(COREScenario):
             e0 = agui.send_message_to_agent(content=self.prompt).depends_on(None, delay_seconds=1)
 
             # Navigate to B1 and establish water depth ~3 cm
-            o_1 = sensors.get_water_depth(zone_id="B1").oracle().depends_on(e0, delay_seconds=1)
-            e_open = irrigation.open_valve(zone_id="B1").oracle().depends_on(o_1, delay_seconds=1)
+            o_1 = sensors.get_water_depth(land_name="B1").oracle().depends_on(e0, delay_seconds=1)
+            e_open = irrigation.open_valve(land_name="B1").oracle().depends_on(o_1, delay_seconds=1)
 
-            sensors.update_depth(zone_id="B1")
+            o_2 = sensors.get_water_depth(land_name="B1").oracle().depends_on(e_open, delay_seconds=1)
+            e_close = irrigation.close_valve(land_name="B1").oracle().depends_on(o_2, delay_seconds=1)
 
-            o_2 = sensors.get_water_depth(zone_id="B1").oracle().depends_on(e_open, delay_seconds=1)
-            e_close = irrigation.close_valve(zone_id="B1").oracle().depends_on(o_2, delay_seconds=1)
-
-            captured = [e0, e_open, o_1, e_close, o_2]
-            last = e_close
+            captured = [e0, o_1, e_open, o_2, e_close]
 
             # Move once to B1 center then single transplant action
             info = state.get_coordinates(land_name="B1").oracle().depends_on(e0, delay_seconds=1)
@@ -66,7 +62,7 @@ class CustomScenario(COREScenario):
             o_move = rover.move_to(x=x, y=y).oracle().depends_on([info, e_close, oracle_2], delay_seconds=1)
             o_transplant = rover.plant_seed(seed_type="rice").oracle().depends_on([o_move, o_config], delay_seconds=0)
 
-            captured.extend([info, o_move, o_transplant, oracle_1, oracle_2])
+            captured.extend([info, o_move, o_transplant, oracle_1, oracle_2, o_config])
             # Water maintenance continues (no additional events needed)
 
         self.events = captured

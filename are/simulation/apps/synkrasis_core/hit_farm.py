@@ -54,6 +54,20 @@ class CentralHubState:
     seed_inventory: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class WeatherState:
+    """Weather state containing current conditions and forecasts."""
+    temperature_celsius: float = 22.0
+    humidity_percent: float = 60.0
+    wind_speed_mps: float = 3.0
+    precipitation_mm: float = 0.0
+    cloud_cover_percent: float = 30.0
+    weather_condition: str = "clear"  # clear, cloudy, rainy, stormy, etc.
+    forecast_data: list[dict] = field(default_factory=list)
+    weather_alerts: list[dict] = field(default_factory=list)
+    last_update: datetime | None = None
+
+
 class CentralHub(COREApp[CentralHubState]):
     """CentralHub (中央基地)
 
@@ -276,6 +290,314 @@ class CentralHub(COREApp[CentralHubState]):
         return f"Refilled {device_id} with {available:.2f} kg fertilizer. Central remaining: {self.state.fertilizer_supply_kg:.2f} kg."
 
 
+class WeatherApp(COREApp[WeatherState]):
+    """WeatherApp (天气应用)
+
+    中文: 天气应用负责提供当前天气信息、天气预测、历史数据和天气警报功能。
+    English: Weather app provides current weather information, forecasts, historical data and weather alerts.
+
+    Attributes:
+      - temperature_celsius: float (当前温度，摄氏度)
+      - humidity_percent: float (相对湿度，百分比)
+      - wind_speed_mps: float (风速，米/秒)
+      - precipitation_mm: float (降雨量，毫米)
+      - cloud_cover_percent: float (云量，百分比)
+      - weather_condition: str (天气状况描述)
+      - forecast_data: list[dict] (天气预测数据)
+      - weather_alerts: list[dict] (天气警报列表)
+
+    Methods (主要方法概览):
+      - get_current_weather(): 获取当前天气信息 / get current weather conditions
+      - get_forecast(hours): 获取未来几小时的天气预测 / get weather forecast for next hours
+      - update_weather(new_conditions): 更新天气状态 / update weather conditions
+      - add_weather_alert(alert_type, severity, message): 添加天气警报 / add weather alert
+      - get_weather_alerts(): 获取当前有效警报 / get active weather alerts
+      - clear_weather_alerts(): 清除所有警报 / clear all alerts
+    """
+    init_state: WeatherState = WeatherState(
+        temperature_celsius=22.0,
+        humidity_percent=60.0,
+        wind_speed_mps=3.0,
+        precipitation_mm=0.0,
+        cloud_cover_percent=30.0,
+        weather_condition="clear",
+        forecast_data=[],
+        weather_alerts=[],
+        last_update=None
+    )
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_current_weather(self):
+        """
+        Get the current weather conditions.
+
+        Returns:
+            dict: A mapping with keys:
+                wind_speed_mps: float (speed of wind, meters per second)
+                precipitation_mm: float (precipitation, millimeters)
+                and so on
+        """
+        from datetime import datetime, timezone
+        self.state.last_update = datetime.now(timezone.utc)
+        return {
+            "temperature_celsius": self.state.temperature_celsius,
+            "humidity_percent": self.state.humidity_percent,
+            "wind_speed_mps": self.state.wind_speed_mps,
+            "precipitation_mm": self.state.precipitation_mm,
+            "cloud_cover_percent": self.state.cloud_cover_percent,
+            "weather_condition": self.state.weather_condition,
+            "last_update": self.state.last_update.isoformat() if self.state.last_update else None
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_forecast(self, hours: int = 24):
+        """
+        Get weather forecast for the next specified hours.
+
+        Args:
+            hours (int): Number of hours to forecast (default: 24, max: 168 for 7 days).
+
+        Returns:
+            list[dict] | str: List of forecast entries or error message.
+        """
+        try:
+            hours = int(hours)
+        except (TypeError, ValueError):
+            return "Error: hours must be an integer."
+
+        if hours <= 0:
+            return "Error: hours must be positive."
+
+        if hours > 168:
+            hours = 168  # Cap at 7 days
+
+        # Generate or return cached forecast data
+        if not self.state.forecast_data or len(self.state.forecast_data) < hours:
+            self.generate_forecast(hours)
+
+        return self.state.forecast_data[:hours]
+
+    def generate_forecast(self, hours: int, forecast_entry: dict | None = None):
+        """
+        Generate synthetic weather forecast data.
+
+        Args:
+            hours (int): Number of hours to generate forecast for.
+        """
+        if forecast_entry:
+            self.state.forecast_data = [forecast_entry]
+            return
+
+
+        import random
+
+        self.state.forecast_data = []
+
+        # Use current weather as starting point
+        temp = self.state.temperature_celsius
+        humidity = self.state.humidity_percent
+        wind = self.state.wind_speed_mps
+
+        for i in range(hours):
+            # Add some random variation
+            temp += random.uniform(-2, 2)
+            temp = max(0, min(40, temp))  # Clamp between 0-40°C
+
+            humidity += random.uniform(-5, 5)
+            humidity = max(20, min(100, humidity))
+
+            wind += random.uniform(-1, 1)
+            wind = max(0, min(20, wind))
+
+            forecast_entry = {
+                "time": i,
+                "temperature_celsius": round(temp, 1),
+                "humidity_percent": round(humidity, 1),
+                "wind_speed_mps": round(wind, 1),
+                "precipitation_probability": random.randint(0, 100),
+            }
+            self.state.forecast_data.append(forecast_entry)
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def update_weather(self, temperature_celsius: float | None = None,
+                      humidity_percent: float | None = None,
+                      wind_speed_mps: float | None = None,
+                      precipitation_mm: float | None = None,
+                      cloud_cover_percent: float | None = None,
+                      atmospheric_pressure_hpa: float | None = None,
+                      weather_condition: str | None = None):
+        """
+        Update current weather conditions.
+
+        Args:
+            temperature_celsius (float | None): New temperature value.
+            humidity_percent (float | None): New humidity value.
+            wind_speed_mps (float | None): New wind speed value.
+            precipitation_mm (float | None): New precipitation value.
+            cloud_cover_percent (float | None): New cloud cover value.
+            atmospheric_pressure_hpa (float | None): New atmospheric pressure value.
+            weather_condition (str | None): New weather condition description.
+
+        Returns:
+            dict: Updated weather state.
+        """
+        from datetime import datetime, timezone
+
+        if temperature_celsius is not None:
+            self.state.temperature_celsius = float(temperature_celsius)
+        if humidity_percent is not None:
+            self.state.humidity_percent = float(humidity_percent)
+        if wind_speed_mps is not None:
+            self.state.wind_speed_mps = float(wind_speed_mps)
+        if precipitation_mm is not None:
+            self.state.precipitation_mm = float(precipitation_mm)
+        if cloud_cover_percent is not None:
+            self.state.cloud_cover_percent = float(cloud_cover_percent)
+        if atmospheric_pressure_hpa is not None:
+            self.state.atmospheric_pressure_hpa = float(atmospheric_pressure_hpa)
+        if weather_condition is not None:
+            self.state.weather_condition = str(weather_condition)
+
+        self.state.last_update = datetime.now(timezone.utc)
+
+        return self.get_current_weather()
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def add_weather_alert(self, alert_type: str, severity: str, message: str, duration_hours: int = 24):
+        """
+        Add a weather alert/warning.
+
+        Args:
+            alert_type (str): Type of alert (e.g., "storm", "frost", "heat", "wind").
+            severity (str): Severity level (e.g., "low", "medium", "high", "critical").
+            message (str): Alert message description.
+            duration_hours (int): How many hours the alert should remain active.
+
+        Returns:
+            dict: The created alert entry.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        alert = {
+            "alert_id": len(self.state.weather_alerts) + 1,
+            "type": str(alert_type),
+            "severity": str(severity),
+            "message": str(message),
+            "issued_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=int(duration_hours))).isoformat(),
+        }
+
+        self.state.weather_alerts.append(alert)
+        return alert
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_weather_alerts(self):
+        """
+        Get all active weather alerts.
+
+        Returns:
+            list[dict]: List of active weather alerts.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+
+        # Filter out expired alerts
+        active_alerts = []
+        for alert in self.state.weather_alerts:
+            try:
+                expires_at = datetime.fromisoformat(alert["expires_at"])
+                if expires_at > now:
+                    active_alerts.append(alert)
+            except Exception:
+                # Keep alerts with invalid expiration dates
+                active_alerts.append(alert)
+
+        # Update the state to only keep active alerts
+        self.state.weather_alerts = active_alerts
+
+        return active_alerts
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def clear_weather_alerts(self):
+        """
+        Clear all weather alerts.
+
+        Returns:
+            str: Confirmation message.
+        """
+        count = len(self.state.weather_alerts)
+        self.state.weather_alerts = []
+        return f"Cleared {count} weather alert(s)."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_agricultural_recommendations(self):
+        """
+        Get agricultural recommendations based on current weather conditions.
+
+        Returns:
+            dict: Recommendations for farming operations.
+        """
+        recommendations = {
+            "irrigation": "normal",
+            "pesticide_application": "suitable",
+            "planting": "suitable",
+            "harvesting": "suitable",
+            "notes": []
+        }
+
+        # Check temperature
+        if self.state.temperature_celsius < 5:
+            recommendations["planting"] = "not recommended"
+            recommendations["notes"].append("Temperature too low for planting.")
+        elif self.state.temperature_celsius > 35:
+            recommendations["irrigation"] = "increased"
+            recommendations["notes"].append("High temperature - increase irrigation.")
+
+        # Check wind speed
+        if self.state.wind_speed_mps > 8:
+            recommendations["pesticide_application"] = "not suitable"
+            recommendations["notes"].append("Wind speed too high for pesticide application.")
+
+        # Check precipitation
+        if self.state.precipitation_mm > 5:
+            recommendations["irrigation"] = "not needed"
+            recommendations["pesticide_application"] = "not suitable"
+            recommendations["harvesting"] = "postpone"
+            recommendations["notes"].append("Rainfall detected - postpone outdoor operations.")
+
+        # Check humidity
+        if self.state.humidity_percent > 85:
+            recommendations["notes"].append("High humidity - monitor for fungal diseases.")
+        elif self.state.humidity_percent < 30:
+            recommendations["irrigation"] = "increased"
+            recommendations["notes"].append("Low humidity - increase irrigation frequency.")
+
+        return recommendations
+
+
 class Land:
     """Land（土地图）
 
@@ -296,6 +618,8 @@ class Land:
         self.origin = (int(origin[0]), int(origin[1]))
         self.width = int(width)
         self.height = int(height)
+        self.water_depth = 0.0
+        self.MDA = 0.52
         self.default_species = None
         self.grid = [[GridCell(x, y, land_name=self.name, origin=self.origin)
                       for y in range(self.height)] for x in range(self.width)]
@@ -658,7 +982,7 @@ class GroundRover(COREApp[GroundRoverState]):
             dict: Updated fertilizer bin count.
         """
         try:
-            n = float(count)
+            n = float(amount_kg)
         except Exception:
             return {"error": "count must be integer"}
         if n <= 0:
@@ -902,31 +1226,31 @@ class IrrigationSystem(App):
       - master_valve_status: 主阀门开关
     """
 
-    def __init__(self, water_pressure_psi=40.0, master_valve_status=False, zone_valve_status=None, env=None):
+    def __init__(self, water_pressure_psi=40.0, master_valve_status=False, zone_valve_status=None, farm_state=None):
         super().__init__("IrrigationSystem")
         self.zone_valve_status = zone_valve_status or {}
         self.water_pressure_psi = float(water_pressure_psi)
         self.master_valve_status = bool(master_valve_status)
-        self.env = env
+        self.farm_state = farm_state
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def open_valve(self, zone_id, duration_minutes=None):
+    def open_valve(self, land_name, duration_minutes=45):
         """
         Open a zone valve, optionally scheduling an automatic close time.
 
         Args:
-            zone_id (str | int): Zone identifier.
-            duration_minutes (float | None): If provided, set an 'open_until' timestamp.
+            land_name (str): Land identifier, e.g., A1
+            duration_minutes (float ): If provided, set an 'open_until' timestamp.defaults to 45 minutes from now.
 
         Returns:
             str: Result message; also ensures the master valve is open.
         """
         from datetime import datetime, timedelta, timezone
         now = datetime.now(timezone.utc)
-        entry = self.zone_valve_status.get(zone_id, {})
+        entry = self.zone_valve_status.get(land_name, {})
         entry['open'] = True
         if duration_minutes is not None:
             try:
@@ -936,35 +1260,39 @@ class IrrigationSystem(App):
                 entry['open_until'] = None
         else:
             entry['open_until'] = None
-        self.zone_valve_status[zone_id] = entry
+        self.zone_valve_status[land_name] = entry
         # 确保主阀门打开以允许分区供水
         if not self.master_valve_status:
             self.master_valve_status = True
-        return f"Valve {zone_id} opened. Master valve: {self.master_valve_status}."
+
+        self.farm_state.lands.get(land_name).water_depth = 3.0
+        self.farm_state.lands.get(land_name).MDA = 0.2
+
+        return f"Valve {land_name} opened. Master valve: {self.master_valve_status}."
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def close_valve(self, zone_id):
+    def close_valve(self, land_name):
         """
-        Close the specified zone valve and clear any auto-close timestamp.
+        Close the specified land valve and clear any auto-close timestamp.
 
         Args:
-            zone_id (str | int): Zone identifier.
+            land_name (str): land identifier eg A1.
 
         Returns:
             str: Result message.
         """
-        entry = self.zone_valve_status.get(zone_id)
+        entry = self.zone_valve_status.get(land_name)
         if not entry:
             # 如果没有记录，创建一个关闭状态
-            self.zone_valve_status[zone_id] = {'open': False, 'open_until': None}
-            return f"Valve {zone_id} closed (was not registered)."
+            self.zone_valve_status[land_name] = {'open': False, 'open_until': None}
+            return f"Valve {land_name} closed (was not registered)."
         entry['open'] = False
         entry['open_until'] = None
-        self.zone_valve_status[zone_id] = entry
-        return f"Valve {zone_id} closed."
+        self.zone_valve_status[land_name] = entry
+        return f"Valve {land_name} closed."
 
     @type_check
     @app_tool()
@@ -1010,19 +1338,14 @@ class SensorNetwork(App):
       - get_data(sensor_ids): 带宽受限的批量读取
     """
 
-    def __init__(self, env=None):
+    def __init__(self, farm_state=None):
         super().__init__("SensorNetwork")
         self.last_reading_timestamp = None
         self.cached_data = {}
-        self.env = env
+        self.farm_state = farm_state
         self.zone_depths = {
             "B1": 2.0,
         }
-
-    def update_depth(self, zone_id):
-
-        self.zone_depths[zone_id] = 3.0
-        return True
 
     @type_check
     @app_tool()
@@ -1046,33 +1369,51 @@ class SensorNetwork(App):
 
     def _cell_at(self, x, y):
         """尝试从 env 中获取对应的 GridCell（x,y 期望为整数或可转为整数）。"""
-        if not self.env:
+        if not self.farm_state:
             return None
         try:
             xi = int(round(float(x)))
             yi = int(round(float(y)))
         except Exception:
             return None
-        if 0 <= xi < self.env.land.width and 0 <= yi < self.env.land.height:
-            return self.env.land.grid[xi][yi]
+        if 0 <= xi < self.farm_state.land.width and 0 <= yi < self.farm_state.land.height:
+            return self.farm_state.land.grid[xi][yi]
         return None
 
     @type_check
     @app_tool()
     @data_tool()
-    @event_registered(operation_type=OperationType.WRITE)
-    def get_water_depth(self,zone_id:str):
+    @event_registered(operation_type=OperationType.READ)
+    def get_water_depth(self,land_name:str):
         """
-        Return water depth at the specified irrigation zone.
+        Return water depth at the specified irrigation land.
 
         Args:
-            zone_id (str): Zone identifier.
+            land_name (str): land identifier.
 
         Returns:
             float | None: Water depth in cm, or None if unavailable.
         """
 
-        return self.zone_depths.get(zone_id, None)
+        return self.farm_state.lands.get(land_name).water_depth
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_land_MDA(self,land_name:str):
+        """
+        Return land MDA at the specified land.
+
+        Args:
+            land_name (str): land identifier.
+
+        Returns:
+            float | None: MDA value, or None if unavailable.
+        """
+
+        return self.farm_state.lands.get(land_name).MDA
+
 
 
     @type_check
