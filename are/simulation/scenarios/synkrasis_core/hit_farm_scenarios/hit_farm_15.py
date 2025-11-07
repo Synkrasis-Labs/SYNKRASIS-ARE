@@ -61,6 +61,6 @@ class CustomScenario(COREScenario):
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CornSeedingWithStarter())
+    run_and_validate(CustomScenario())
 
 
