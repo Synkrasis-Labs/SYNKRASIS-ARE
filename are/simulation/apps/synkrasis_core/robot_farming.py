@@ -260,6 +260,7 @@ class RobotFarmingApp(COREApp[RobotFarmState]):
 
         :returns: Confirmation message indicating safety mode is unlocked.
         """
+        print("=====================================\n\n\t\tUNLOCKING SAFETY MODE\n\n=====================================", flush=True)
         self.state.safety_mode = False
         return "Safety mode unlocked."
 

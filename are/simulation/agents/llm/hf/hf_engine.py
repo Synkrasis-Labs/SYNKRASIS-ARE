@@ -7,6 +7,7 @@
 
 import logging
 import os
+import time
 from typing import Any
 
 from huggingface_hub import (
@@ -122,11 +123,13 @@ class HuggingFaceLLMEngine(LLMEngine):
             converted_message = self._convert_message_to_hf_format(message)
             converted_messages.append(converted_message)
 
+        start_time = time.time()
         response = self.client.chat.completions.create(
             model=self.model_config.model_name,
             messages=converted_messages,
             stop=stop_sequences,
         )
+        completion_duration = time.time() - start_time
 
         if not isinstance(response, ChatCompletionOutput):
             error_msg = f"Expected ChatCompletionOutput, got {type(response)}"
@@ -150,4 +153,11 @@ class HuggingFaceLLMEngine(LLMEngine):
             raise ValueError(error_msg)
 
         content = content.replace("False", "false").replace("True", "true")
-        return content, None
+
+        metadata: dict[str, Any] = {"completion_duration": completion_duration}
+        if response.usage is not None:
+            metadata["prompt_tokens"] = response.usage.prompt_tokens
+            metadata["completion_tokens"] = response.usage.completion_tokens
+            metadata["total_tokens"] = response.usage.total_tokens
+
+        return content, metadata

@@ -58,6 +58,11 @@ class SystemApp(App):
         """
         timestamp = self.time_manager.time()
         date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        print("CURRENT TIME: ", {
+            "current_timestamp": timestamp,
+            "current_datetime": date.strftime("%Y-%m-%d %H:%M:%S"),
+            "current_weekday": date.strftime("%A"),
+        }, flush=True)
         return {
             "current_timestamp": timestamp,
             "current_datetime": date.strftime("%Y-%m-%d %H:%M:%S"),
@@ -79,8 +84,8 @@ class SystemApp(App):
     def reset_wait_for_notification_timeout(self):
         self.wait_for_notification_timeout = None
 
-    @app_tool()
-    @event_registered(operation_type=OperationType.READ)
+    # @app_tool()
+    # @event_registered(operation_type=OperationType.READ)
     def wait_for_notification(
         self,
         timeout: int = 0,

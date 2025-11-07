@@ -6,6 +6,7 @@
 
 
 import logging
+import time
 from typing import Any
 
 from litellm import completion
@@ -93,6 +94,7 @@ Action:
         stop_sequences=[],
         **kwargs,
     ) -> tuple[str, dict | None]:
+        start_time = time.time()
         try:
             # Convert messages to LiteLLM format with multimodal support
             converted_messages = []
@@ -116,6 +118,8 @@ Action:
             )
 
             assert type(response) is ModelResponse
+            latency = time.time() - start_time
+
             assert len(response.choices) >= 1
             assert type(response.choices[0]) is Choices
 
@@ -126,6 +130,15 @@ Action:
             for stop_token in stop_sequences:
                 res = res.split(stop_token)[0]
 
-            return res, None
+            metadata: dict[str, Any] = {"completion_duration": latency}
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                metadata["prompt_tokens"] = getattr(usage, "prompt_tokens", None)
+                metadata["completion_tokens"] = getattr(
+                    usage, "completion_tokens", None
+                )
+                metadata["total_tokens"] = getattr(usage, "total_tokens", None)
+
+            return res, metadata
         except (AuthenticationError, APIError) as e:
             raise LLMEngineException("Auth error in litellm.") from e
