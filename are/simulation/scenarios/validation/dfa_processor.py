@@ -84,6 +84,27 @@ def generate_alphabet(
             )
             general_generated.append(func_call.name)
 
+    # add a symbol for unused tools
+    for tool in tools:
+        if tool.name not in used_tools or not used_tools[tool.name]:
+            char = next(gen)
+            if not tool.arguments:
+                alphabet[char] = FunctionCall(name=tool.name, arguments={})
+                continue
+
+            for arg_name, arg_type in tool.arguments.items():
+                alphabet[char] = FunctionCall(
+                    name=tool.name,
+                    arguments={
+                        arg_name: FunctionArgument(
+                            name=arg_name,
+                            value=None,
+                            excluded_values=None,
+                            type=arg_type,
+                        )
+                    },
+                )
+
     return alphabet
 
 
