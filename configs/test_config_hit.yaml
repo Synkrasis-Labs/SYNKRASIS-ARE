@@ -1,5 +1,8 @@
 scenarios:
-  - "hit_farm_1"
+  - "hit_farm_11"
+  - "hit_farm_13"
+  - "hit_farm_15"
+  - "hit_farm_16"
 
 evaluation_settings:
   timeout_minutes: 10
