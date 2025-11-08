@@ -111,7 +111,7 @@ Action:
                 custom_llm_provider=provider,
                 messages=converted_messages,
                 api_base=self.model_config.endpoint,
-                api_key=self.model_config.api_key,
+                api_key=self.model_config.api_key or "sk-EMPTY",
                 mock_response=self.mock_response,
             )
 

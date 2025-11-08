@@ -21,7 +21,7 @@ class CustomScenario(COREScenario):
         weather = WeatherApp()
         weather.generate_forecast(hours=1, forecast_entry={"time": 0, "precipitation_probability": 70})
         state = HitFarmState()
-        irrigation = IrrigationSystem()
+        irrigation = IrrigationSystem(farm_state = state)
         sensors = SensorNetwork(farm_state = state)
         self.apps = [agui, state, weather, irrigation, sensors]
 

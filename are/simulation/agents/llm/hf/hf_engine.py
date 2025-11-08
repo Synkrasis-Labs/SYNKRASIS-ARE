@@ -64,7 +64,7 @@ class HuggingFaceLLMEngine(LLMEngine):
         self.model_config = model_config
 
         if (model_config.model_name.startswith("deepseek")):
-            api_key = os.getenv("DEEPSEEK_API_KEY_ARE")
+            api_key = os.getenv("DEEPSEEK_API_KEY")
             self.client = InferenceClient(
                 bill_to=os.getenv("HF_BILL_TO") or None,
                 provider=model_config.provider,  # type: ignore
