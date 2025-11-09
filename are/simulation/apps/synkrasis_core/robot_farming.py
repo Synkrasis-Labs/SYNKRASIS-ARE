@@ -7,13 +7,11 @@
 # the root directory of this source tree.
 
 from dataclasses import dataclass
-from typing import Any
 
-from are.simulation.apps.app import App
 from are.simulation.tool_utils import OperationType, app_tool, data_tool
 from are.simulation.types import event_registered
-from are.simulation.utils import get_state_dict, type_check
-
+from are.simulation.utils import type_check
+from are.simulation.apps.core_app import COREApp
 
 @dataclass
 class Pose:
@@ -191,7 +189,7 @@ initState = RobotFarmState(
 )
 
 
-class RobotFarmingApp(App):
+class RobotFarmingApp(COREApp[RobotFarmState]):
     """
     @TODO: Update docstring
 
@@ -207,42 +205,7 @@ class RobotFarmingApp(App):
     This app manages a collection of tasks with basic CRUD operations.
     """
 
-    # App-specific configuration
-    name: str | None = "RobotFarmingApp"
-    robot_farm_state: RobotFarmState = initState
-
-    def __post_init__(self):
-        """Initialize the app - always call super().__init__()"""
-        super().__init__(self.name)
-        print("RobotFarmingApp initialized", flush=True)
-
-    def get_state(self) -> dict[str, Any]:
-        """
-        Return the app's current state for persistence.
-        Use get_state_dict utility for consistent serialization.
-        """
-        print(f"Getting state for {self.name}", flush=True)
-        return get_state_dict(self, ["tasks", "robot_farm_state"])
-
-    def load_state(self, state_dict: dict[str, Any]):
-        """
-        Restore app state from saved data.
-        Handle data conversion and validation carefully.
-        """
-        # @TODO: when is this called?
-        pass
-
-    def reset(self):
-        """Reset app to initial state - important for scenario repeatability"""
-        super().reset()
-        print(f"Resetting {self.name}", flush=True)
-        self.tasks = {}
-        self.robot_farm_state = initState
-
-    # Step 4: Tool Methods - The Core Functionality
-    # ============================================
-    # Tool methods are the primary interface between agents and your app.
-    # Use decorators to register methods as tools with proper metadata.
+    init_state: RobotFarmState = initState
 
     # Helper methods for spatial calculations
     def _dist_xy(
@@ -263,12 +226,12 @@ class RobotFarmingApp(App):
 
     def _within_bounds(self, x: float, y: float) -> bool:
         """Check if coordinates are within field bounds"""
-        bounds = self.robot_farm_state.field_bounds
+        bounds = self.state.field_bounds
         return bounds.x_min <= x <= bounds.x_max and bounds.y_min <= y <= bounds.y_max
 
     def _in_no_go_zone(self, x: float, y: float) -> bool:
         """Check if coordinates intersect any no-go zone"""
-        for zone in self.robot_farm_state.no_go_xy:
+        for zone in self.state.no_go_xy:
             if zone.x_min <= x <= zone.x_max and zone.y_min <= y <= zone.y_max:
                 return True
         return False
@@ -297,7 +260,8 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation message indicating safety mode is unlocked.
         """
-        self.robot_farm_state.safety_mode = False
+        print("=====================================\n\n\t\tUNLOCKING SAFETY MODE\n\n=====================================", flush=True)
+        self.state.safety_mode = False
         return "Safety mode unlocked."
 
     @type_check
@@ -324,7 +288,7 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation message indicating safety mode is locked.
         """
-        self.robot_farm_state.safety_mode = True
+        self.state.safety_mode = True
         return "Safety mode locked."
 
     @type_check
@@ -356,7 +320,7 @@ class RobotFarmingApp(App):
         :param speed: Optional travel speed parameter (ignored in this simulation).
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before moving."
 
         if not self._within_bounds(x, y):
@@ -365,12 +329,12 @@ class RobotFarmingApp(App):
         if self._in_no_go_zone(x, y):
             return "ERROR: Target location lies within a no-go zone."
 
-        self.robot_farm_state.pose.x = x
-        self.robot_farm_state.pose.y = y
+        self.state.pose.x = x
+        self.state.pose.y = y
         if yaw is not None:
-            self.robot_farm_state.pose.yaw = yaw
+            self.state.pose.yaw = yaw
         # speed is accepted for realism, ignored in this simulation
-        return f"Moved to (x={x:.2f}, y={y:.2f}, yaw={self.robot_farm_state.pose.yaw:.2f})."
+        return f"Moved to (x={x:.2f}, y={y:.2f}, yaw={self.state.pose.yaw:.2f})."
 
     @type_check
     @app_tool()
@@ -394,9 +358,9 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation or error message from the underlying `move_to(...)` call.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before moving."
-        home = self.robot_farm_state.home_pose
+        home = self.state.home_pose
         return self.move_to(home.x, home.y, home.yaw)
 
     @type_check
@@ -431,40 +395,40 @@ class RobotFarmingApp(App):
         :param plant_id: Identifier of the target plant (key in `self.world_state["plants"]`).
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before harvesting."
 
         # Find plant by ID (using index as ID for simplicity)
         try:
             plant_idx = int(plant_id)
-            if plant_idx < 0 or plant_idx >= len(self.robot_farm_state.plants):
+            if plant_idx < 0 or plant_idx >= len(self.state.plants):
                 return "ERROR: Unknown plant id."
-            plant = self.robot_farm_state.plants[plant_idx]
+            plant = self.state.plants[plant_idx]
         except (ValueError, IndexError):
             return "ERROR: Unknown plant id."
 
         if not plant.has_fruit:
             return "ERROR: No harvestable fruit on this plant."
-        if plant.ripeness < self.robot_farm_state.ripe_threshold:
+        if plant.ripeness < self.state.ripe_threshold:
             return "ERROR: Fruit not ripe enough to harvest."
 
         if (
-            self._dist_xy(self.robot_farm_state.pose, plant.pose)
-            > self.robot_farm_state.plant_tolerance_xy
+            self._dist_xy(self.state.pose, plant.pose)
+            > self.state.plant_tolerance_xy
         ):
             return "ERROR: Not within harvesting tolerance."
 
         weight = plant.fruit_weight
         if (
-            self.robot_farm_state.hopper_load_kg + weight
-            > self.robot_farm_state.hopper_capacity_kg
+            self.state.hopper_load_kg + weight
+            > self.state.hopper_capacity_kg
         ):
             return "ERROR: Hopper capacity exceeded."
 
         # success
-        self.robot_farm_state.hopper_load_kg += weight
+        self.state.hopper_load_kg += weight
         plant.has_fruit = False
-        return f"Harvested {weight:.2f} kg from {plant_id}. Hopper now {self.robot_farm_state.hopper_load_kg:.2f} kg."
+        return f"Harvested {weight:.2f} kg from {plant_id}. Hopper now {self.state.hopper_load_kg:.2f} kg."
 
     @type_check
     @app_tool()
@@ -488,18 +452,18 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before dumping."
 
-        bin_station = self.robot_farm_state.stations["collection_bin"]
+        bin_station = self.state.stations["collection_bin"]
         if (
-            self._dist_xy(self.robot_farm_state.pose, bin_station.pose)
-            > self.robot_farm_state.station_tolerance_xy
+            self._dist_xy(self.state.pose, bin_station.pose)
+            > self.state.station_tolerance_xy
         ):
             return "ERROR: Not at collection bin."
 
-        dumped = self.robot_farm_state.hopper_load_kg
-        self.robot_farm_state.hopper_load_kg = 0.0
+        dumped = self.state.hopper_load_kg
+        self.state.hopper_load_kg = 0.0
         return f"Dumped {dumped:.2f} kg at collection bin."
 
     @type_check
@@ -534,7 +498,7 @@ class RobotFarmingApp(App):
         :param liters: Amount of water to apply (liters).
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before watering."
 
         if liters <= 0:
@@ -543,31 +507,31 @@ class RobotFarmingApp(App):
         # Find plant by ID (using index as ID for simplicity)
         try:
             plant_idx = int(plant_id)
-            if plant_idx < 0 or plant_idx >= len(self.robot_farm_state.plants):
+            if plant_idx < 0 or plant_idx >= len(self.state.plants):
                 return "ERROR: Unknown plant id."
-            plant = self.robot_farm_state.plants[plant_idx]
+            plant = self.state.plants[plant_idx]
         except (ValueError, IndexError):
             return "ERROR: Unknown plant id."
 
         if (
-            self._dist_xy(self.robot_farm_state.pose, plant.pose)
-            > self.robot_farm_state.plant_tolerance_xy
+            self._dist_xy(self.state.pose, plant.pose)
+            > self.state.plant_tolerance_xy
         ):
             return "ERROR: Not within watering tolerance."
 
-        if self.robot_farm_state.water_tank_l < liters:
+        if self.state.water_tank_l < liters:
             return "ERROR: Not enough water in tank."
 
         new_moisture = (
-            plant.moisture + liters / self.robot_farm_state.water_tank_capacity_l
+            plant.moisture + liters / self.state.water_tank_capacity_l
         )
-        if new_moisture > self.robot_farm_state.max_moisture:
+        if new_moisture > self.state.max_moisture:
             return "ERROR: Moisture would exceed safe limit."
 
         # success
-        self.robot_farm_state.water_tank_l -= liters
-        plant.moisture = min(new_moisture, self.robot_farm_state.max_moisture)
-        return f"Watered {plant_id} with {liters:.2f} L. Tank: {self.robot_farm_state.water_tank_l:.2f} L."
+        self.state.water_tank_l -= liters
+        plant.moisture = min(new_moisture, self.state.max_moisture)
+        return f"Watered {plant_id} with {liters:.2f} L. Tank: {self.state.water_tank_l:.2f} L."
 
     @type_check
     @app_tool()
@@ -601,7 +565,7 @@ class RobotFarmingApp(App):
         :param ml: Amount of pesticide to apply (milliliters).
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before spraying."
 
         if ml <= 0:
@@ -610,9 +574,9 @@ class RobotFarmingApp(App):
         # Find plant by ID (using index as ID for simplicity)
         try:
             plant_idx = int(plant_id)
-            if plant_idx < 0 or plant_idx >= len(self.robot_farm_state.plants):
+            if plant_idx < 0 or plant_idx >= len(self.state.plants):
                 return "ERROR: Unknown plant id."
-            plant = self.robot_farm_state.plants[plant_idx]
+            plant = self.state.plants[plant_idx]
         except (ValueError, IndexError):
             return "ERROR: Unknown plant id."
 
@@ -620,18 +584,18 @@ class RobotFarmingApp(App):
             return "ERROR: No pest detected on this plant."
 
         if (
-            self._dist_xy(self.robot_farm_state.pose, plant.pose)
-            > self.robot_farm_state.plant_tolerance_xy
+            self._dist_xy(self.state.pose, plant.pose)
+            > self.state.plant_tolerance_xy
         ):
             return "ERROR: Not within spraying tolerance."
 
-        if self.robot_farm_state.pesticide_tank_ml < ml:
+        if self.state.pesticide_tank_ml < ml:
             return "ERROR: Not enough pesticide in tank."
 
         # success
-        self.robot_farm_state.pesticide_tank_ml -= ml
+        self.state.pesticide_tank_ml -= ml
         plant.pest = False
-        return f"Sprayed {ml:.0f} ml pesticide on {plant_id}. Tank: {self.robot_farm_state.pesticide_tank_ml:.0f} ml."
+        return f"Sprayed {ml:.0f} ml pesticide on {plant_id}. Tank: {self.state.pesticide_tank_ml:.0f} ml."
 
     @type_check
     @app_tool()
@@ -655,18 +619,18 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before refilling."
 
-        water_station = self.robot_farm_state.stations["water_station"]
+        water_station = self.state.stations["water_station"]
         if (
-            self._dist_xy(self.robot_farm_state.pose, water_station.pose)
-            > self.robot_farm_state.station_tolerance_xy
+            self._dist_xy(self.state.pose, water_station.pose)
+            > self.state.station_tolerance_xy
         ):
             return "ERROR: Not at water station."
 
-        self.robot_farm_state.water_tank_l = self.robot_farm_state.water_tank_capacity_l
-        return f"Water tank refilled to {self.robot_farm_state.water_tank_l:.2f} L."
+        self.state.water_tank_l = self.state.water_tank_capacity_l
+        return f"Water tank refilled to {self.state.water_tank_l:.2f} L."
 
     @type_check
     @app_tool()
@@ -691,20 +655,20 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before refilling."
 
-        pesticide_station = self.robot_farm_state.stations["pesticide_refill"]
+        pesticide_station = self.state.stations["pesticide_refill"]
         if (
-            self._dist_xy(self.robot_farm_state.pose, pesticide_station.pose)
-            > self.robot_farm_state.station_tolerance_xy
+            self._dist_xy(self.state.pose, pesticide_station.pose)
+            > self.state.station_tolerance_xy
         ):
             return "ERROR: Not at pesticide refill station."
 
-        self.robot_farm_state.pesticide_tank_ml = (
-            self.robot_farm_state.pesticide_tank_capacity_ml
+        self.state.pesticide_tank_ml = (
+            self.state.pesticide_tank_capacity_ml
         )
-        return f"Pesticide tank refilled to {self.robot_farm_state.pesticide_tank_ml:.0f} ml."
+        return f"Pesticide tank refilled to {self.state.pesticide_tank_ml:.0f} ml."
 
     @type_check
     @app_tool()
@@ -728,17 +692,17 @@ class RobotFarmingApp(App):
 
         :returns: Confirmation or error message.
         """
-        if self.robot_farm_state.safety_mode:
+        if self.state.safety_mode:
             return "ERROR: Safety mode is enabled. Unlock before recharging."
 
-        charging_station = self.robot_farm_state.stations["charging_pad"]
+        charging_station = self.state.stations["charging_pad"]
         if (
-            self._dist_xy(self.robot_farm_state.pose, charging_station.pose)
-            > self.robot_farm_state.station_tolerance_xy
+            self._dist_xy(self.state.pose, charging_station.pose)
+            > self.state.station_tolerance_xy
         ):
             return "ERROR: Not at charging pad."
 
-        self.robot_farm_state.battery_pct = 100.0
+        self.state.battery_pct = 100.0
         return "Battery recharged to 100%."
 
     @type_check
@@ -761,9 +725,9 @@ class RobotFarmingApp(App):
         :returns: dict containing {'x': float, 'y': float, 'yaw': float}.
         """
         return {
-            "x": self.robot_farm_state.pose.x,
-            "y": self.robot_farm_state.pose.y,
-            "yaw": self.robot_farm_state.pose.yaw,
+            "x": self.state.pose.x,
+            "y": self.state.pose.y,
+            "yaw": self.state.pose.yaw,
         }
 
     @type_check
@@ -787,7 +751,7 @@ class RobotFarmingApp(App):
 
         :returns: Battery percentage string (e.g., '80.0%').
         """
-        return f"{self.robot_farm_state.battery_pct:.1f}%"
+        return f"{self.state.battery_pct:.1f}%"
 
     @type_check
     @app_tool()
@@ -812,8 +776,8 @@ class RobotFarmingApp(App):
         :returns: dict with {'load_kg': float, 'capacity_kg': float}.
         """
         return {
-            "load_kg": self.robot_farm_state.hopper_load_kg,
-            "capacity_kg": self.robot_farm_state.hopper_capacity_kg,
+            "load_kg": self.state.hopper_load_kg,
+            "capacity_kg": self.state.hopper_capacity_kg,
         }
 
     @type_check
@@ -839,7 +803,7 @@ class RobotFarmingApp(App):
         :returns: dict[str, dict] of plant metadata.
         """
         result = {}
-        for i, plant in enumerate(self.robot_farm_state.plants):
+        for i, plant in enumerate(self.state.plants):
             result[str(i)] = {
                 "pose": {"x": plant.pose.x, "y": plant.pose.y},
                 "ripeness": plant.ripeness,
@@ -881,9 +845,9 @@ class RobotFarmingApp(App):
         """
         try:
             plant_idx = int(plant_id)
-            if plant_idx < 0 or plant_idx >= len(self.robot_farm_state.plants):
+            if plant_idx < 0 or plant_idx >= len(self.state.plants):
                 return {"error": "Unknown plant id."}
-            plant = self.robot_farm_state.plants[plant_idx]
+            plant = self.state.plants[plant_idx]
         except (ValueError, IndexError):
             return {"error": "Unknown plant id."}
 
@@ -919,9 +883,9 @@ class RobotFarmingApp(App):
         """
         try:
             plant_idx = int(plant_id)
-            if plant_idx < 0 or plant_idx >= len(self.robot_farm_state.plants):
+            if plant_idx < 0 or plant_idx >= len(self.state.plants):
                 return {"error": "Unknown plant id."}
-            plant = self.robot_farm_state.plants[plant_idx]
+            plant = self.state.plants[plant_idx]
         except (ValueError, IndexError):
             return {"error": "Unknown plant id."}
 
@@ -948,7 +912,7 @@ class RobotFarmingApp(App):
         :param station_name: Name of the station (e.g., 'collection_bin', 'charging_pad').
         :returns: {'x': float, 'y': float, 'yaw': float} or {'error': 'Unknown station name.'}.
         """
-        station = self.robot_farm_state.stations.get(station_name)
+        station = self.state.stations.get(station_name)
         if station is None:
             return {"error": "Unknown station name."}
 
