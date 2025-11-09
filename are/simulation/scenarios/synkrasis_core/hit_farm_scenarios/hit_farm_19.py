@@ -13,7 +13,7 @@ class CustomScenario(COREScenario):
     prompt: str | None = (
         "Plot A1, MAD = 52%, requires irrigation; "
         "if the probability of rainfall in the next 60 minutes is ≥70%; Do not start  the irrigation task. "
-        "Re-evaluate after 2 hours. If there is still no rainfall after 2 hours and MAD>50%, begin irrigate until MAD<30% stop irrigation task."
+        "Re-evaluate . If there is still no rainfall  and MAD>50%, begin irrigate until MAD<30% stop irrigation task."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
@@ -34,13 +34,13 @@ class CustomScenario(COREScenario):
             e0 = agui.send_message_to_agent(content=self.prompt).depends_on(None, delay_seconds=1)
 
             weather_forecast = weather.get_forecast(hours=1).oracle().depends_on(e0, delay_seconds=1)
-            weather_current = weather.get_current_weather().oracle().depends_on(weather_forecast, delay_seconds=2*60*60)
+            weather_current = weather.get_current_weather().oracle().depends_on(weather_forecast, delay_seconds=2)
             sensor_mad = sensor.get_land_MDA(land_name="A1").oracle().depends_on(weather_current, delay_seconds=1)
             e_open = irrigation.open_valve(land_name="A1").oracle().depends_on(sensor_mad, delay_seconds=1)
             sensor_mad_2 = sensor.get_land_MDA(land_name="A1").oracle().depends_on(weather_current, delay_seconds=1)
             e_close = irrigation.close_valve(land_name="A1").oracle().depends_on(e_open, delay_seconds=1)
 
-            self.events = [e0, weather_forecast, weather_current, sensor_mad, e_open,sensor_mad_2, e_close]
+        self.events = [e0, weather_forecast, weather_current, sensor_mad, e_open,sensor_mad_2, e_close]
 
 
 

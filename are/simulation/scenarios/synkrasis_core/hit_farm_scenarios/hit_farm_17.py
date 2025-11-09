@@ -1,10 +1,10 @@
 from are.simulation.apps.agent_user_interface import AgentUserInterface
 from are.simulation.apps.synkrasis_core.hit_farm import (
-    HitFarmState, Drone, GroundRover, CentralHub, IrrigationSystem, SensorNetwork
+    HitFarmState, IrrigationSystem, SensorNetwork, Plant
 )
-from are.simulation.scenarios.core_scenario import COREScenario
-from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
+from are.simulation.scenarios.core_scenario import COREScenario
+
 
 class CustomScenario(COREScenario):
     """
@@ -13,23 +13,23 @@ class CustomScenario(COREScenario):
     """
 
     prompt: str | None = (
-        "B2: if phenology=3–4 leaves, fill to 5 cm (±0.5) and maintain; inspect every 2 h; log start and device status."
+        "B2:Rice flood establishment .  "
+        "Check if the rice in Area B2 has grown to the 3-4 leaf stage. "
+        "If so, fill water up to 5 cm and then stop fill."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
         agui = AgentUserInterface()
         state = HitFarmState()
-        drone = Drone(farm_state=state)
-        rover = GroundRover(farm_state=state, device_id='rover-1')
-        hub = CentralHub(farm_state=state)
+        land = state.lands["B2"]
+        land.plant_land(plant = Plant(species="rice", growth_stage="3-4 leaf",mature=False))
         irrigation = IrrigationSystem(farm_state=state)
         sensors = SensorNetwork(farm_state=state)
-        state.register_drone(drone)
-        state.register_rover(rover)
-        state.register_central_hub(hub)
+
+
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui, state] + state.drones + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
+        self.apps = [agui, state,irrigation,sensors]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -40,33 +40,24 @@ class CustomScenario(COREScenario):
         with EventRegisterer.capture_mode():
             # Single user message to trigger the entire workflow
             e0 = agui.send_message_to_agent(content=self.prompt).depends_on(None, delay_seconds=1)
-
             # Get coordinates for B2
-            info = state.get_coordinates(land_name="B2").oracle().depends_on(e0, delay_seconds=1)
+            o1 = state.get_coordinates(land_name="B2").oracle().depends_on(e0, delay_seconds=1)
+            (x, y) = state.lands["B2"].origin
+            o2=sensors.get_plant_status(x=x, y=y).oracle().depends_on(o1, delay_seconds=1)
 
-            # Check initial water depth
-            o_depth_initial = sensors.get_water_depth(land_name="B2").oracle().depends_on(info, delay_seconds=1)
+
+            o3 = sensors.get_water_depth(land_name="B2").oracle().depends_on(o2, delay_seconds=1)
 
             # Open valve to fill to 5 cm (using land_name parameter)
-            e_open = irrigation.open_valve(land_name="B2", duration_minutes=45).oracle().depends_on(o_depth_initial, delay_seconds=1)
+            o4 = irrigation.open_valve(land_name="B2", duration_minutes=45,water_depth_cm=5.0).oracle().depends_on(o3, delay_seconds=1)
 
-            # Update sensor cache to record target water depth
-            e_set = sensors.update_cache(sensor_id="B2_water", data_dict={"water_depth_cm": 5.0}).oracle().depends_on(e_open, delay_seconds=1)
+            o5 = sensors.get_water_depth(land_name="B2").oracle().depends_on(o4, delay_seconds=1)
 
-            # Check water depth after opening valve
-            o_depth_check1 = sensors.get_water_depth(land_name="B2").oracle().depends_on(e_set, delay_seconds=1)
 
             # Close valve after reaching target
-            e_close = irrigation.close_valve(land_name="B2").oracle().depends_on(o_depth_check1, delay_seconds=1)
+            o7 = irrigation.close_valve(land_name="B2").oracle().depends_on(o5, delay_seconds=1)
 
-            # Two-hour inspection checks
-            # First check at 2 hours
-            o_depth_2h = sensors.get_water_depth(land_name="B2").oracle().depends_on(e_close, delay_seconds=1)
-
-            # Second check at 4 hours
-            o_depth_4h = sensors.get_water_depth(land_name="B2").oracle().depends_on(o_depth_2h, delay_seconds=1)
-
-            self.events = [e0, info, o_depth_initial, e_open, e_set, o_depth_check1, e_close, o_depth_2h, o_depth_4h]
+        self.events = [e0, o1,o2, o3, o4, o5, o7]
 
 
 if __name__ == "__main__":

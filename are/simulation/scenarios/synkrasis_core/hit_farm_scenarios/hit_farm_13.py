@@ -29,7 +29,7 @@ class CustomScenario(COREScenario):
         state.register_central_hub(hub)
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui, state] + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
+        self.apps = [agui, state, rover, hub, irrigation, sensors]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -44,11 +44,10 @@ class CustomScenario(COREScenario):
 
             # Navigate to B1 and establish water depth ~3 cm
             o_1 = sensors.get_water_depth(land_name="B1").oracle().depends_on(e0, delay_seconds=1)
-            e_open = irrigation.open_valve(land_name="B1").oracle().depends_on(o_1, delay_seconds=1)
+            e_open = irrigation.open_valve(land_name="B1", water_depth_cm=3.0).oracle().depends_on(o_1, delay_seconds=1)
 
             o_2 = sensors.get_water_depth(land_name="B1").oracle().depends_on(e_open, delay_seconds=1)
             e_close = irrigation.close_valve(land_name="B1").oracle().depends_on(o_2, delay_seconds=1)
-
 
             # Move once to B1 center then single transplant action
             info = state.get_coordinates(land_name="B1").oracle().depends_on(e0, delay_seconds=1)
@@ -58,8 +57,8 @@ class CustomScenario(COREScenario):
 
             (x, y) = state.lands["B1"].origin
             o_move = rover.move_to(x=x, y=y).oracle().depends_on([info, oracle_1], delay_seconds=1)
-            o_transplant = rover.plant_seed(seed_type="rice",row_spacing_cm=20.0, depth_cm=5.0,
-                                                in_row_spacing_cm=20.0).oracle().depends_on(o_move, delay_seconds=0)
+            o_transplant = rover.plant_seed(seed_type="rice", row_spacing_cm=20.0, depth_cm=5.0,
+                                            in_row_spacing_cm=20.0).oracle().depends_on(o_move, delay_seconds=0)
             o_return = rover.return_to_base().oracle().depends_on(o_transplant, delay_seconds=1)
 
             # Water maintenance continues (no additional events needed)

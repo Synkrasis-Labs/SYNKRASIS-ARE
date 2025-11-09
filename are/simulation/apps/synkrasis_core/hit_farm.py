@@ -19,15 +19,16 @@ from are.simulation.utils import type_check
 
 @dataclass
 class DroneState:
-    position: tuple[float, float, float] = (15.0, -5.0,0.0)
+    position: tuple[float, float, float] = (15.0, -5.0, 0.0)
     speed_mps: float = 10.0
     consumption_rate: float = 0.5
     battery_percentage: float = 100.0
     pesticide_tank_ml: float = 0.0
-    camera_status: bool = False
     flight_status: str = 'landed'
     device_id: str | None = None
     pesticide_tank_capacity: float | None = None
+    operational_status: str = 'available'  # available, unavailable, maintenance
+    fault_message: str = ''  # Stores fault/error messages
 
 
 @dataclass
@@ -49,7 +50,8 @@ class CentralHubState:
     water_supply_liters: float
     pesticide_supply_ml: float
     fertilizer_supply_kg: float
-    position: tuple[float, float, float] = (15.0, -5.0,0.0)
+    lime_supply_kg: float = 500.0
+    position: tuple[float, float, float] = (15.0, -5.0, 0.0)
     docking_radius: float = 5.0
     seed_inventory: dict[str, int] = field(default_factory=dict)
 
@@ -79,6 +81,7 @@ class CentralHub(COREApp[CentralHubState]):
       - water_supply_liters: float (中央储水量，升)
       - pesticide_supply_ml: float (中央农药库存，毫升)
       - fertilizer_supply_kg: float (中央肥料库存，千克)
+      - lime_supply_kg: float (中央石灰库存，千克)
 
     Methods (主要方法概览):
       - register_device(device_id, initial_status=None): 注册设备到中央基地 / register a device at the hub
@@ -87,15 +90,17 @@ class CentralHub(COREApp[CentralHubState]):
       - refill_water(device_id, amount_liters): 补充水 / refill water
       - refill_pesticide(device_id, amount_ml): 补充农药 / refill pesticide
       - refill_fertilizer(device_id, amount_kg): 补充肥料 / refill fertilizer
+      - refill_lime(device_id, amount_kg): 补充石灰 / refill lime
     """
     init_state: CentralHubState = CentralHubState(power_grid_status=True, water_supply_liters=10000.0,
                                                   pesticide_supply_ml=50000.0, fertilizer_supply_kg=1000.0,
+                                                  lime_supply_kg=500.0,
                                                   position=(15.0, -5.0, 0.0),
                                                   docking_radius=5.0,
                                                   seed_inventory={"corn": 8000, "soybean": 2000, "wheat": 3000,
                                                                   "rice": 3000})
 
-    def __init__(self, farm_state:HitFarmState=None):
+    def __init__(self, farm_state: HitFarmState = None):
         super().__init__()
         self.farm_state = farm_state
 
@@ -258,6 +263,36 @@ class CentralHub(COREApp[CentralHubState]):
         self.state.fertilizer_supply_kg -= available
         return f"Refilled {device_id} with {available:.2f} kg fertilizer. Central remaining: {self.state.fertilizer_supply_kg:.2f} kg."
 
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def refill_lime(self, device_id, amount_kg):
+        """
+        Refill a device's lime bin from the central supply.
+
+        Args:
+            device_id (str): Target device identifier.
+            amount_kg (float): Requested kilograms to transfer.
+
+        Returns:
+            str: Result message with transferred mass and remaining central lime.
+        """
+        try:
+            amount = float(amount_kg)
+        except (TypeError, ValueError):
+            return "Error: amount must be a number."
+        if amount <= 0:
+            return "Error: amount must be positive."
+        available = min(amount, self.state.lime_supply_kg)
+        if available <= 0:
+            return "Error: no lime available in central supply."
+
+        device = self.farm_state.get_rover(device_id)
+        device.state.lime_bin_kg = device.state.lime_bin_kg + available
+        self.state.lime_supply_kg -= available
+        return f"Refilled {device_id} with {available:.2f} kg lime. Central remaining: {self.state.lime_supply_kg:.2f} kg."
+
 
 class WeatherApp(COREApp[WeatherState]):
     """WeatherApp (天气应用)
@@ -363,7 +398,6 @@ class WeatherApp(COREApp[WeatherState]):
             self.state.forecast_data = [forecast_entry]
             return
 
-
         import random
 
         self.state.forecast_data = []
@@ -398,12 +432,12 @@ class WeatherApp(COREApp[WeatherState]):
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def update_weather(self, temperature_celsius: float | None = None,
-                      humidity_percent: float | None = None,
-                      wind_speed_mps: float | None = None,
-                      precipitation_mm: float | None = None,
-                      cloud_cover_percent: float | None = None,
-                      atmospheric_pressure_hpa: float | None = None,
-                      weather_condition: str | None = None):
+                       humidity_percent: float | None = None,
+                       wind_speed_mps: float | None = None,
+                       precipitation_mm: float | None = None,
+                       cloud_cover_percent: float | None = None,
+                       atmospheric_pressure_hpa: float | None = None,
+                       weather_condition: str | None = None):
         """
         Update current weather conditions.
 
@@ -590,6 +624,7 @@ class Land:
         self.water_depth = 0.0
         self.MDA = 0.52
         self.default_species = None
+        self.density_per_m2 = 5.2
         self.grid = [[GridCell(x, y, land_name=self.name, origin=self.origin)
                       for y in range(self.height)] for x in range(self.width)]
 
@@ -597,14 +632,27 @@ class Land:
         """Set the default crop species for this land."""
         self.default_species = str(species)
 
+    def plant_land(self, plant: Plant | None = None, species: str = "", planting_date=None) -> bool:
+        for x in range(self.width):
+            for y in range(self.height):
+                cell = self.grid[x][y]
+                if planting_date is None:
+                    from datetime import datetime, timezone
+                    planting_date = datetime.now(timezone.utc)
+                cell.plant = plant or Plant(species=species or self.default_species or 'soybean',
+                                            planting_date=planting_date)
+        return True
+
     def plant_at(self, x: int, y: int, species: str | None = None, planting_date=None) -> bool:
         """Plant a crop at local cell (x, y). Returns True if planted.
 
         If *species* is None, use ``self.default_species`` if available.
         """
-        if not (0 <= x < self.width and 0 <= y < self.height):
+        x_o = x - self.origin[0]
+        y_o = y - self.origin[1]
+        if not (0 <= x_o < self.width and 0 <= y_o < self.height):
             return False
-        cell = self.grid[x][y]
+        cell = self.grid[x_o][y_o]
         if cell.plant is not None:
             return False
         if species is None:
@@ -644,6 +692,9 @@ class GridCell:
       - plant: Plant or None.
       - soil_moisture: float in [0, 1].
       - nutrient_level: dict of nutrients (nitrogen, phosphorus, potassium).
+      - soil_pH: float (soil pH level, typically 4.0-9.0).
+      - smoke_level: float (0.0 = none, >0.3 triggers alarm).
+      - temperature_celsius: float (ambient temperature).
     """
 
     def __init__(self, x, y, land_name=None, origin=(0, 0)):
@@ -653,6 +704,12 @@ class GridCell:
         self.plant = None
         self.soil_moisture = 0.6
         self.nutrient_level = {'nitrogen': 0.8, 'phosphorus': 0.6, 'potassium': 0.7}
+        self.soil_pH = 5.2
+        self.smoke_level = 0.0
+        self.temperature_celsius = 22.0
+        # Disease and pest attributes
+        self.diseases = {'rust': 0.0, 'powdery_mildew': 0.0}
+        self.pests = {'aphid': 0.3, 'brown_planthopper': 0.3}
 
 
 class Plant:
@@ -673,13 +730,17 @@ class Plant:
       - grow(time_delta_seconds, moisture, nutrients): 基于湿度和养分增加高度 / increment height based on moisture and nutrients
     """
 
-    def __init__(self, species, planting_date):
+    def __init__(self, species, planting_date=None, growth_stage: str = "", mature: bool = False, status: str = ""):
         self.species = species
         self.planting_date = planting_date
         self.age_days = 0
         self.height_cm = 1.0
         self.health = 1.0
         self.water_demand = 0.01
+        self.growth_stage = growth_stage
+        self.mature = mature
+        self.status = status
+        self.maturity_index = 0.0  # 0-1, where 1.0 = fully mature
 
     def grow(self, time_delta_seconds, moisture, nutrients):
         self.age_days += time_delta_seconds / (24 * 3600)
@@ -702,25 +763,32 @@ class Drone(COREApp[DroneState]):
       - consumption_rate: 电耗率（百分比/秒）
       - battery_percentage: 电量百分比
       - pesticide_tank_ml: 罐内农药剩余（毫升）
-      - camera_status: 相机开关
       - flight_status: 'landed'/'flying' 等
 
     Methods (主要方法):
       - takeoff(): 起飞
       - land(): 降落
-      - fly_to(x,y,z): 飞往指定坐标
-      - inspect_plot(x,y,resolution): 使用相机查看地块
+      - fly_to(x,y): 飞往指定坐标（逐行飞行路径，L形）
+      - inspect_plot(x,y,sampling_density): 从(x,y)开始S型路径检查地块
       - apply_pesticide(area, amount_ml): 喷洒农药
+      - estimate_weed_density(land_name/x,y,sampling_density): 估算杂草密度（S型路径+耗电）
+      - identify_weed_species(land_name/x,y,sampling_density): 识别杂草种类（S型路径+耗电）
+      - estimate_plant_density(crop_species,land_name/x,y,sampling_density): 估算作物密度（S型路径+耗电）
+
+    Note:
+      - 探测任务采用S型飞行路径（row-by-row，交替方向）
+      - 飞行路径：从起点到地块终点，走完一行掉头走另一行
+      - 采样密度：high(1m²/图), medium(4m²/图), low(9m²/图)
+      - 探测耗电 = 飞行耗电 + 图像捕获耗电(0.5%/图)
+      - 任务执行前自动检查电量，不足时提示充电
     """
-    init_state:DroneState = DroneState(position=(15.0, -5.0,0.0), speed_mps=10.0, consumption_rate=0.5,
-                                      battery_percentage=100.0, pesticide_tank_ml=0.0,
-                                      camera_status=False, flight_status='landed',
-                                      device_id=None, pesticide_tank_capacity=None)
+    init_state: DroneState = DroneState(position=(15.0, -5.0, 0.0), speed_mps=10.0, consumption_rate=0.5,
+                                        battery_percentage=100.0, pesticide_tank_ml=0.0, flight_status='landed',
+                                        device_id=None, pesticide_tank_capacity=None)
 
     def __init__(self, farm_state=None):
         super().__init__()
         self.farm_state = farm_state
-
 
     @property
     def battery(self):
@@ -733,6 +801,172 @@ class Drone(COREApp[DroneState]):
         except Exception:
             pass
 
+    def _calculate_survey_requirements(self, land, start_x, start_y, sampling_density):
+        """
+        Calculate battery and image requirements for surveying a land plot.
+
+        Args:
+            land: Land object to survey
+            start_x, start_y: Starting coordinates within the land
+            sampling_density: 'high' (1m²/image), 'medium' (4m²/image), 'low' (9m²/image)
+
+        Returns:
+            dict: Requirements including distance, images, and battery cost
+        """
+        # Sampling area per image (in m²)
+        density_map = {
+            'high': 1.0,    # 1m × 1m = 1m²
+            'medium': 4.0,  # 2m × 2m = 4m²
+            'low': 9.0      # 3m × 3m = 9m²
+        }
+
+        area_per_image = density_map.get(sampling_density, 4.0)  # default to medium
+
+        # Convert land dimensions from grid cells to meters (assuming 1 cell ≈ 1m)
+        land_width_m = land.width
+        land_height_m = land.height
+
+        # Calculate starting position relative to land origin
+        local_x = start_x - land.origin[0]
+        local_y = start_y - land.origin[1]
+
+        # Remaining area to survey
+        remaining_width = land_width_m - local_x
+        remaining_height = land_height_m - local_y
+        survey_area_m2 = remaining_width * remaining_height
+
+        # Calculate number of images needed
+        images_needed = int(survey_area_m2 / area_per_image)
+
+        # Calculate S-shaped path distance
+        # Approximate: width of each row × number of rows + turning distance
+        row_spacing = area_per_image ** 0.5  # sqrt of area
+        num_rows = int(remaining_height / row_spacing)
+
+        # S-path distance: sum of horizontal traversals + vertical movements
+        horizontal_distance = remaining_width * num_rows
+        vertical_distance = remaining_height - row_spacing  # turning between rows
+        total_distance = horizontal_distance + vertical_distance
+
+        # Battery cost calculation
+        # Flight time + image capture time (0.5% per image) + processing overhead
+        flight_time_seconds = total_distance / max(1e-6, self.state.speed_mps)
+        flight_battery_cost = flight_time_seconds * self.state.consumption_rate
+        image_capture_cost = images_needed * 0.05  # 0.5% battery per image
+        total_battery_cost = flight_battery_cost + image_capture_cost
+
+        return {
+            'total_distance': total_distance,
+            'images_needed': images_needed,
+            'survey_area_m2': survey_area_m2,
+            'battery_cost': total_battery_cost,
+            'sufficient_battery': self.state.battery_percentage >= total_battery_cost
+        }
+
+    def _perform_survey_flight(self, land, start_x, start_y, sampling_density):
+        """
+        Perform S-shaped survey flight pattern over a land plot.
+
+        Args:
+            land: Land object
+            start_x, start_y: Starting coordinates
+            sampling_density: Sampling density level
+
+        Returns:
+            bool: True if survey completed successfully, False otherwise
+        """
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        if not reqs['sufficient_battery']:
+            return False
+
+        # Deduct battery for the survey
+        self.state.battery_percentage = max(0.0, self.state.battery_percentage - reqs['battery_cost'])
+
+        # Update position to end of survey area (bottom-right of remaining area)
+        end_x = land.origin[0] + land.width - 1
+        end_y = land.origin[1] + land.height - 1
+        self.state.position = np.array((float(end_x), float(end_y), 20.0), dtype=float)
+
+        return True
+
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def preflight_check(self, simulate_fault=None):
+        """
+        Perform pre-flight system check including motors, sensors, battery, and communication.
+
+        Args:
+            simulate_fault (str, optional): Simulate a specific fault for testing (e.g., "Motor #3 speed deviation").
+
+        Returns:
+            dict: Check results with status and any detected issues.
+        """
+        checks = {
+            'battery': 'PASS',
+            'motors': 'PASS',
+            'sensors': 'PASS',
+            'communication': 'PASS',
+            'gps': 'PASS'
+        }
+
+        issues = []
+
+        # Check operational status
+        if self.state.operational_status == 'unavailable':
+            return {
+                'status': 'FAIL',
+                'message': f"Device unavailable: {self.state.fault_message}",
+                'checks': checks,
+                'issues': [self.state.fault_message]
+            }
+
+        # Battery check
+        if self.state.battery_percentage < 20:
+            checks['battery'] = 'FAIL'
+            issues.append(f"Low battery: {self.state.battery_percentage}%")
+
+        # Simulate fault if requested (for testing scenarios)
+        if simulate_fault:
+            checks['motors'] = 'FAIL'
+            issues.append(simulate_fault)
+            self.state.operational_status = 'unavailable'
+            self.state.fault_message = simulate_fault
+
+        overall_status = 'PASS' if not issues else 'FAIL'
+
+        return {
+            'status': overall_status,
+            'message': 'All systems nominal' if not issues else 'Pre-flight check failed',
+            'checks': checks,
+            'issues': issues,
+            'device_id': self.state.device_id,
+            'battery': self.state.battery_percentage,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def set_device_status(self, status, fault_message=''):
+        """
+        Set the operational status of the device.
+
+        Args:
+            status (str): 'available', 'unavailable', or 'maintenance'
+            fault_message (str): Optional fault description
+
+        Returns:
+            str: Status update confirmation
+        """
+        self.state.operational_status = status
+        self.state.fault_message = fault_message
+        return f"Device {self.state.device_id} status set to {status}. {fault_message}"
+
     @type_check
     @app_tool()
     @data_tool()
@@ -744,6 +978,8 @@ class Drone(COREApp[DroneState]):
         Returns:
             str: Result message or an error if already flying or battery is too low.
         """
+        if self.state.operational_status == 'unavailable':
+            return f"Error: Cannot takeoff - device unavailable: {self.state.fault_message}"
         if self.state.flight_status == 'flying':
             return "Already flying."
         if self.state.battery_percentage <= 1.0:
@@ -781,7 +1017,8 @@ class Drone(COREApp[DroneState]):
         Returns:
             str: Final position and battery usage, or a partial-move warning.
         """
-        hub_pos = self.farm_state.central_hub.state.position if self.farm_state and self.farm_state.central_hub else (0.0, 0.0)
+        hub_pos = self.farm_state.central_hub.state.position if self.farm_state and self.farm_state.central_hub else (
+            0.0, 0.0)
         return self._fly_to(hub_pos[0], hub_pos[1])
 
     @type_check
@@ -804,48 +1041,187 @@ class Drone(COREApp[DroneState]):
     def _fly_to(self, x, y):
         if self.state.flight_status != 'flying':
             return "Error: Drone not flying."
-        target = np.array((float(x), float(y),20.0), dtype=float)
-        distance = float(np.linalg.norm(self.state.position - target))
-        time_needed_seconds = distance / max(1e-6, self.state.speed_mps)
-        energy_cost = time_needed_seconds * self.state.consumption_rate
+
+        # Calculate row-by-row flight path (L-shaped: x first, then y)
+        current_pos = self.state.position
+        intermediate = np.array((float(x), current_pos[1], 20.0), dtype=float)
+        target = np.array((float(x), float(y), 20.0), dtype=float)
+
+        # Calculate total distance via intermediate point (row-by-row path)
+        dist_to_intermediate = float(np.linalg.norm(intermediate - current_pos))
+        dist_to_target = float(np.linalg.norm(target - intermediate))
+        total_distance = dist_to_intermediate + dist_to_target
+
+        time_needed_seconds = total_distance / max(1e-6, self.state.speed_mps)
+        consumption_rate = self.state.consumption_rate
+        energy_cost = time_needed_seconds * consumption_rate
+
         if energy_cost <= self.state.battery_percentage:
+            # Sufficient battery: complete the row-by-row flight
             self.state.position = target
             self.state.battery_percentage = max(0.0, self.state.battery_percentage - energy_cost)
-            return f"Flight successful. Time: {time_needed_seconds:.1f}s, Battery used: {energy_cost:.2f}% (remaining {self.state.battery_percentage:.2f}%)."
+            return f"Flight successful via row-by-row path. Time: {time_needed_seconds:.1f}s, Battery used: {energy_cost:.2f}%(remaining {self.state.battery_percentage:.2f}%)."
         else:
-            max_time = self.state.battery_percentage / max(1e-9, self.state.consumption_rate)
-            travel_fraction = min(1.0, (max_time * self.state.speed_mps) / max(1e-9, distance)) if distance > 0 else 0.0
-            new_pos = self.state.position + (target - self.state.position) * travel_fraction
+            # Insufficient battery: fly as far as possible on row-by-row path
+            max_time = self.state.battery_percentage / max(1e-9, consumption_rate)
+            max_distance = max_time * self.state.speed_mps
+
+            if max_distance >= dist_to_intermediate:
+                # Can reach intermediate point and go further
+                remaining_dist = max_distance - dist_to_intermediate
+                remaining_fraction = remaining_dist / max(1e-9, dist_to_target)
+                new_pos = intermediate + (target - intermediate) * min(1.0, remaining_fraction)
+            else:
+                # Can't even reach intermediate point
+                fraction = max_distance / max(1e-9, dist_to_intermediate)
+                new_pos = current_pos + (intermediate - current_pos) * min(1.0, fraction)
+
             self.state.position = new_pos
             used = self.state.battery_percentage
             self.state.battery_percentage = 0.0
-            return f"Warning: Insufficient battery. Flew partially to {tuple(self.state.position)}, battery depleted (used {used:.2f}%)."
+            return f"Warning: Insufficient battery. Flew partially along row-by-row path to {tuple(self.state.position)}, battery depleted (used {used:.2f}%)."
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def inspect_plot(self, x, y, resolution=(640, 480)):
+    def inspect_plot(self, x, y, sampling_density='medium'):
         """
-        Capture a simulated observation of a plot center.
+        Capture observations of a plot using S-shaped flight pattern from (x,y) to plot end.
 
         Args:
-            x (float): Plot center X coordinate.
-            y (float): Plot center Y coordinate.
-            resolution (tuple[int, int]): Image resolution as (width, height).
+            x (float): Starting X coordinate within the plot.
+            y (float): Starting Y coordinate within the plot.
+            sampling_density (str): 'high' (1m²/image), 'medium' (2m×2m=4m²/image), 'low' (3m×3m=9m²/image).
 
         Returns:
-            dict | str: Observation dictionary if the camera is on; otherwise an error string.
+            dict | str: Observation summary or error if insufficient battery.
         """
-        if not self.state.camera_status:
-            return "Error: Camera is off."
+        # Find which land this coordinate belongs to
+        land = self.farm_state.get_land_at(x, y)
+        if land is None:
+            return {"error": f"Coordinates ({x}, {y}) not in any land plot."}
+
+        # Calculate survey requirements
+        reqs = self._calculate_survey_requirements(land, x, y, sampling_density)
+
+        # Check if battery is sufficient
+        if not reqs['sufficient_battery']:
+            return {
+                "error": "Insufficient battery for inspection.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        # Perform the survey flight
+        success = self._perform_survey_flight(land, x, y, sampling_density)
+
+        if not success:
+            return {"error": "Survey flight failed."}
+
         obs = {
-            'center': (float(x), float(y)),
-            'resolution': tuple(resolution),
-            'position': tuple(self.state.position),
+            'land_name': land.name,
+            'start_position': (float(x), float(y)),
+            'end_position': tuple(self.state.position[:2]),
+            'sampling_density': sampling_density,
+            'images_captured': reqs['images_needed'],
+            'area_surveyed_m2': round(reqs['survey_area_m2'], 2),
+            'distance_flown': round(reqs['total_distance'], 2),
+            'battery_used': round(reqs['battery_cost'], 2),
+            'battery_remaining': round(self.state.battery_percentage, 2),
+            'flight_pattern': 'S-shaped (row-by-row with alternating direction)',
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         return obs
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def assess_pest_activity(self, land_name, pest_type, sampling_density='medium'):
+        """
+        Assess pest activity in a land.
+
+        Args:
+            land_name (str): Land identifier (e.g., 'B3').
+            pest_type (str): Type of pest to assess (e.g., 'brown_planthopper', 'aphid').
+            sampling_density (str): 'high', 'medium', or 'low'.
+
+        Returns:
+            dict: Pest activity assessment with severity and distribution.
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        start_x, start_y = land.origin
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        if not reqs['sufficient_battery']:
+            return {
+                "error": f"Insufficient battery for pest assessment.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        success = self._perform_survey_flight(land, start_x, start_y, sampling_density)
+        if not success:
+            return {"error": "Survey flight failed."}
+
+        cell = land.grid[0][0]
+        pests = getattr(cell, 'pests', {})
+        severity = pests.get(pest_type, 0.0)
+
+
+        return {
+            'land_name': land_name,
+            'pest_type': pest_type,
+            'severity': round(severity, 2)
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def detect_disease_hotspots(self, land_name,sampling_density='high'):
+        """
+        Detect early disease hotspots using multispectral/NIR or close-up leaf imaging.
+
+        Args:
+            land_name (str): Land identifier (e.g., 'D1').
+            sampling_density (str): 'high' (recommended for disease detection), 'medium', or 'low'.
+
+        Returns:
+            dict: Disease detection results with hotspot locations and severity.
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        start_x, start_y = land.origin
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        if not reqs['sufficient_battery']:
+            return {
+                "error": f"Insufficient battery for disease detection.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        success = self._perform_survey_flight(land, start_x, start_y, sampling_density)
+        if not success:
+            return {"error": "Survey flight failed."}
+
+        cell = land.grid[0][0]
+        diseases = getattr(cell, 'diseases', {})
+
+        return {
+            'land_name': land_name,
+            'diseases_detected': diseases
+        }
 
     @type_check
     @app_tool()
@@ -874,6 +1250,266 @@ class Drone(COREApp[DroneState]):
         self.state.pesticide_tank_ml -= applied
         return f"Applied {applied:.2f} ml pesticide to {area}. Remaining tank: {self.state.pesticide_tank_ml:.2f} ml."
 
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def estimate_weed_density(self, land_name=None, x=None, y=None, sampling_density='medium'):
+        """
+        Estimate weed density using aerial imaging with S-shaped flight pattern.
+
+        Args:
+            land_name (str, optional): Land identifier (e.g., 'C2', 'C4'). Surveys entire land.
+            x (float, optional): Starting X coordinate. If provided with y, surveys from (x,y) to plot end.
+            y (float, optional): Starting Y coordinate.
+            sampling_density (str): 'high' (1m²/image), 'medium' (4m²/image), 'low' (9m²/image).
+
+        Returns:
+            dict: Dictionary containing weed density estimate, battery usage, and survey info.
+        """
+        # Determine which mode: full land or partial from (x, y)
+        if land_name:
+            land = self.farm_state.lands.get(land_name)
+            if land is None:
+                return {"error": f"Land {land_name} not found."}
+            start_x, start_y = land.origin
+        elif x is not None and y is not None:
+            land = self.farm_state.get_land_at(x, y)
+            if land is None:
+                return {"error": f"Coordinates ({x}, {y}) not in any land plot."}
+            start_x, start_y = x, y
+        else:
+            return {"error": "Must provide either land_name or (x, y) coordinates."}
+
+        # Calculate survey requirements
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        # Check if battery is sufficient
+        if not reqs['sufficient_battery']:
+            return {
+                "error": "Insufficient battery for weed density estimation.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        # Perform the survey flight
+        success = self._perform_survey_flight(land, start_x, start_y, sampling_density)
+
+        if not success:
+            return {"error": "Survey flight failed."}
+
+        # Calculate actual weed density from plants in the surveyed area
+        # Weeds are plants that don't match the land's default species
+        expected_species = getattr(land, 'default_species', None)
+        weed_count = 0
+        total_plants = 0
+
+        # Calculate surveyed area bounds
+        local_start_x = start_x - land.origin[0]
+        local_start_y = start_y - land.origin[1]
+
+        for x in range(local_start_x, land.width):
+            for y in range(local_start_y, land.height):
+                cell = land.grid[x][y]
+                if cell.plant is not None:
+                    total_plants += 1
+                    # If plant species doesn't match expected, it's a weed
+                    if expected_species and cell.plant.species != expected_species:
+                        weed_count += 1
+                    # Also check if plant has a 'weed' attribute
+                    elif getattr(cell.plant, 'is_weed', False):
+                        weed_count += 1
+
+        weed_density = weed_count / reqs['survey_area_m2'] if reqs['survey_area_m2'] > 0 else 0.0
+
+        return {
+            'land_name': land.name,
+            'survey_mode': 'full_land' if land_name else 'partial_from_coordinates',
+            'start_position': (start_x, start_y),
+            'end_position': tuple(self.state.position[:2]),
+            'sampling_density': sampling_density,
+            'images_captured': reqs['images_needed'],
+            'area_surveyed_m2': round(reqs['survey_area_m2'], 2),
+            'total_weeds': weed_count,
+            'total_plants': total_plants,
+            'expected_species': expected_species,
+            'weed_density_per_m2': round(weed_density, 2),
+            'estimated_total_weeds': weed_count,
+            'distance_flown': round(reqs['total_distance'], 2),
+            'battery_used': round(reqs['battery_cost'], 2),
+            'battery_remaining': round(self.state.battery_percentage, 2),
+            'flight_pattern': 'S-shaped (row-by-row with alternating direction)',
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def identify_weed_species(self, land_name=None, x=None, y=None, sampling_density='high'):
+        """
+        Identify specific weed species using aerial imaging with S-shaped flight pattern.
+        Requires high-density sampling for accurate species identification.
+
+        Args:
+            land_name (str, optional): Land identifier (e.g., 'C4'). Surveys entire land.
+            x (float, optional): Starting X coordinate. If provided with y, surveys from (x,y) to plot end.
+            y (float, optional): Starting Y coordinate.
+            sampling_density (str): 'high' (1m²/image, recommended), 'medium' (4m²/image), 'low' (9m²/image).
+
+        Returns:
+            dict: Dictionary with detected weed species, battery usage, and survey info.
+        """
+        # Determine which mode: full land or partial from (x, y)
+        if land_name:
+            land = self.farm_state.lands.get(land_name)
+            if land is None:
+                return {"error": f"Land {land_name} not found."}
+            start_x, start_y = land.origin
+        elif x is not None and y is not None:
+            land = self.farm_state.get_land_at(x, y)
+            if land is None:
+                return {"error": f"Coordinates ({x}, {y}) not in any land plot."}
+            start_x, start_y = x, y
+        else:
+            return {"error": "Must provide either land_name or (x, y) coordinates."}
+
+        # Calculate survey requirements
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        # Check if battery is sufficient
+        if not reqs['sufficient_battery']:
+            return {
+                "error": "Insufficient battery for weed species identification.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        # Perform the survey flight
+        success = self._perform_survey_flight(land, start_x, start_y, sampling_density)
+
+        if not success:
+            return {"error": "Survey flight failed."}
+
+        # Identify weed species from actual plants
+        expected_species = getattr(land, 'default_species', None)
+        species_counts = {}  # species_name -> count
+        species_details = {}  # species_name -> details
+
+        # Calculate surveyed area bounds
+        local_start_x = start_x - land.origin[0]
+        local_start_y = start_y - land.origin[1]
+
+        for x in range(local_start_x, land.width):
+            for y in range(local_start_y, land.height):
+                cell = land.grid[x][y]
+                if cell.plant is not None:
+                    plant = cell.plant
+                    # Check if this is a weed (not the expected species)
+                    is_weed = False
+                    if expected_species and plant.species != expected_species:
+                        is_weed = True
+                    elif getattr(plant, 'is_weed', False):
+                        is_weed = True
+
+                    if is_weed:
+                        species_name = plant.species
+                        if species_name not in species_counts:
+                            species_counts[species_name] = 0
+                            # Determine weed characteristics from plant attributes
+                            # Check if it's a twining weed (e.g., morning glory, bindweed)
+                            twining_species = ['morning glory', 'bindweed', 'climbing nightshade']
+                            is_twining = any(tw in species_name.lower() for tw in twining_species)
+                            risk_level = 'high' if is_twining else getattr(plant, 'risk_level', 'medium')
+
+                            species_details[species_name] = {
+                                'twining': is_twining,
+                                'risk_level': risk_level,
+                                'growth_stage': plant.growth_stage
+                            }
+                        species_counts[species_name] += 1
+
+        # Format results
+        detected_species = []
+        for species_name, count in species_counts.items():
+            details = species_details[species_name]
+            detected_species.append({
+                'name': species_name,
+                'twining': details['twining'],
+                'risk': details['risk_level'],
+                'count_estimate': count,
+                'confidence': 0.90,  # High confidence from actual plant data
+                'growth_stage': details['growth_stage']
+            })
+
+        has_twining_weeds = any(sp["twining"] for sp in detected_species)
+
+        return {
+            'land_name': land.name,
+            'survey_mode': 'full_land' if land_name else 'partial_from_coordinates',
+            'start_position': (start_x, start_y),
+            'end_position': tuple(self.state.position[:2]),
+            'expected_crop': expected_species,
+            'sampling_density': sampling_density,
+            'images_captured': reqs['images_needed'],
+            'area_surveyed_m2': round(reqs['survey_area_m2'], 2),
+            'detected_species': detected_species,
+            'has_twining_weeds': has_twining_weeds,
+            'high_risk_species_present': any(sp["risk"] == "high" for sp in detected_species),
+            'distance_flown': round(reqs['total_distance'], 2),
+            'battery_used': round(reqs['battery_cost'], 2),
+            'battery_remaining': round(self.state.battery_percentage, 2),
+            'flight_pattern': 'S-shaped (row-by-row with alternating direction)',
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def estimate_plant_density(self, crop_species, land_name=None,sampling_density='medium'):
+        """
+        Estimate crop plant density using aerial imaging with S-shaped flight pattern.
+
+        Args:
+            crop_species (str): Expected crop species (e.g., 'corn').
+            land_name (str, optional): Land identifier (e.g., 'A1'). Surveys entire land.
+            sampling_density (str): 'high' (1m²/image), 'medium' (4m²/image), 'low' (9m²/image).
+
+        Returns:
+            dict: Dictionary with plant density estimate, battery usage, and survey info.
+        """
+        # Determine which mode: full land or partial from (x, y)
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+        start_x, start_y = land.origin
+
+
+        # Calculate survey requirements
+        reqs = self._calculate_survey_requirements(land, start_x, start_y, sampling_density)
+
+        # Check if battery is sufficient
+        if not reqs['sufficient_battery']:
+            return {
+                "error": "Insufficient battery for plant density estimation.",
+                "battery_required": round(reqs['battery_cost'], 2),
+                "battery_available": round(self.state.battery_percentage, 2),
+                "suggestion": "Return to base to recharge before attempting this survey."
+            }
+
+        # Perform the survey flight
+        success = self._perform_survey_flight(land, start_x, start_y, sampling_density)
+
+        if not success:
+            return {"error": "Survey flight failed."}
+
+        return {
+            'density_per_m2': round(land.density_per_m2, 2),
+        }
+
 
 @dataclass
 class GroundRoverState:
@@ -881,12 +1517,15 @@ class GroundRoverState:
     battery_percentage: float = 100.0
     water_tank_liters: float = 10.0
     fertilizer_bin_kg: float = 50.0
+    lime_bin_kg: float = 0.0
     tool_attachment_status: dict = field(default_factory=dict)
     seed_bin: dict[str, int] = field(default_factory=dict)
     device_id: str | None = None
     planter_config: dict = field(default_factory=lambda: {
         "row_spacing_cm": None, "depth_cm": None, "in_row_spacing_cm": None
     })
+    operational_status: str = 'available'  # available, unavailable, maintenance
+    fault_message: str = ''  # Stores fault/error messages
 
 
 class GroundRover(COREApp[GroundRoverState]):
@@ -900,28 +1539,35 @@ class GroundRover(COREApp[GroundRoverState]):
       - battery_percentage: 电量百分比
       - water_tank_liters: 水箱容量（升）
       - fertilizer_bin_kg: 肥料箱（千克）
+      - lime_bin_kg: 石灰箱（千克）
       - tool_attachment_status: 工具挂载状态字典
       - seed_bin: 种子箱（按种类计数）
 
     Methods (主要方法):
-      - move_to(x, y): 移动到目标坐标
+      - move_to(x, y): 移动到目标坐标（逐行移动路径）
       - water_plant(plant_loc, liters): 为指定植物浇水
       - apply_fertilizer(plant_loc, kg): 为指定植物施肥
+      - apply_lime(kg, target_pH): 施用石灰调节土壤pH值
       - plant_seed(seed_type): 在当前位置种植种子
       - harvest_crop(plant_loc): 收获作物
+      - thin_plants(crop_species, target_count): 疏苗（移除过密植物）
+
+    Note:
+      - 移动路径采用逐行移动（L形路径）以优化农业作业
     """
     init_state: GroundRoverState = GroundRoverState(position=(0.0, 0.0), battery_percentage=100.0,
                                                     water_tank_liters=10.0, fertilizer_bin_kg=5.0,
+                                                    lime_bin_kg=0.0,
                                                     tool_attachment_status={}, seed_bin={},
                                                     planter_config={"row_spacing_cm": None, "depth_cm": None,
                                                                     "in_row_spacing_cm": None})
 
-    def __init__(self, device_id, farm_state:HitFarmState=None):
+    def __init__(self, device_id, farm_state: HitFarmState = None):
         super().__init__()
         self.state.device_id = device_id
         self.farm_state = farm_state
 
-    def set_planter_config(self, row_spacing_cm: float , depth_cm: float,
+    def set_planter_config(self, row_spacing_cm: float, depth_cm: float,
                            in_row_spacing_cm: float):
         """
         Set or update the planter configuration parameters.
@@ -959,7 +1605,8 @@ class GroundRover(COREApp[GroundRoverState]):
         Returns:
             str: Final position and battery usage, or a partial-move warning.
         """
-        hub_pos = self.farm_state.central_hub.state.position if self.farm_state and self.farm_state.central_hub else (0.0, 0.0)
+        hub_pos = self.farm_state.central_hub.state.position if self.farm_state and self.farm_state.central_hub else (
+            0.0, 0.0)
         return self._move_to(hub_pos[0], hub_pos[1])
 
     @type_check
@@ -984,28 +1631,46 @@ class GroundRover(COREApp[GroundRoverState]):
             target = np.array((float(x), float(y)), dtype=float)
         except Exception:
             return "Error: invalid target coordinates."
-        distance = float(np.linalg.norm(self.state.position - target))
-        ok, cost = self._consume_battery_for_distance(distance)
+
+        # Calculate row-by-row movement path (L-shaped: x first, then y)
+        current_pos = self.state.position
+        intermediate = np.array((float(x), current_pos[1]), dtype=float)
+
+        # Calculate total distance via intermediate point (row-by-row path)
+        dist_to_intermediate = float(np.linalg.norm(intermediate - current_pos))
+        dist_to_target = float(np.linalg.norm(target - intermediate))
+        total_distance = dist_to_intermediate + dist_to_target
+
+        ok, cost = self._consume_battery_for_distance(total_distance)
+
         if not ok:
-            if distance <= 0:
+            if total_distance <= 0:
                 return "Error: Already at target or cannot move."
-            fraction = self.state.battery_percentage / max(1e-9, cost)
-            new_pos = self.state.position + (target - self.state.position) * fraction
-            # TODO
+            # Insufficient battery: move as far as possible on row-by-row path
+            max_distance = (self.state.battery_percentage / 0.02) if self.state.battery_percentage > 0 else 0
+
+            if max_distance >= dist_to_intermediate:
+                # Can reach intermediate point and go further
+                remaining_dist = max_distance - dist_to_intermediate
+                remaining_fraction = remaining_dist / max(1e-9, dist_to_target)
+                new_pos = intermediate + (target - intermediate) * min(1.0, remaining_fraction)
+            else:
+                # Can't even reach intermediate point
+                fraction = max_distance / max(1e-9, dist_to_intermediate)
+                new_pos = current_pos + (intermediate - current_pos) * min(1.0, fraction)
+
             self.state.position = new_pos
             used = self.state.battery_percentage
             self.state.battery_percentage = 0.0
-            return f"Warning: Insufficient battery. Moved partially to {tuple(self.state.position)}. Battery depleted (used {used:.2f}%)."
+            return f"Warning: Insufficient battery. Moved partially along row-by-row path to {tuple(self.state.position)}. Battery depleted (used {used:.2f}%)."
         else:
-            # TODO
+            # Sufficient battery: complete the row-by-row movement
             self.state.position = target
-            return f"Moved to {tuple(self.state.position)}. Battery used: {cost:.2f}%. Remaining: {self.state.battery_percentage:.2f}%"
+            return f"Moved to {tuple(self.state.position)} via row-by-row path. Battery used: {cost:.2f}%. Remaining: {self.state.battery_percentage:.2f}%"
 
     def _resolve_cell(self, plant_loc):
         if plant_loc is None:
             return None, None
-
-
 
     @type_check
     @app_tool()
@@ -1038,8 +1703,52 @@ class GroundRover(COREApp[GroundRoverState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def plant_seed(self, seed_type ,row_spacing_cm: float = 2.0, depth_cm: float = 2.0,
-                           in_row_spacing_cm: float = 2.0):
+    def apply_lime(self, kg, target_pH: float = 6.5):
+        """
+        Apply lime to soil to adjust pH level towards target.
+
+        Args:
+            kg (float): Kilograms of lime requested to apply.
+            target_pH (float): Target pH level (typically 6.0-7.0).
+
+        Returns:
+            str: Result message with applied mass and remaining bin.
+        """
+        try:
+            amount = float(kg)
+        except Exception:
+            return "Error: amount must be a number."
+        if amount <= 0:
+            return "Error: amount must be positive."
+        if self.state.lime_bin_kg <= 0:
+            return "Error: lime bin empty."
+
+        applied = min(amount, self.state.lime_bin_kg)
+        self.state.lime_bin_kg -= applied
+
+        # Update soil pH in the current land
+        land = self.farm_state.get_land_at(self.state.position[0], self.state.position[1])
+        if land is not None:
+            # Apply lime effect across the land - increase pH based on lime amount
+            # Simplified model: 1 kg lime increases pH by ~0.5 for a standard plot
+            pH_increase = applied * 0.5
+            for x in range(land.width):
+                for y in range(land.height):
+                    cell = land.grid[x][y]
+                    current_pH = getattr(cell, 'soil_pH', 5.2)
+                    new_pH = min(target_pH, current_pH + pH_increase)
+                    cell.soil_pH = new_pH
+
+            return f"Applied {applied:.3f} kg lime to {land.name}. Soil pH adjusted towards {target_pH}. Remaining bin: {self.state.lime_bin_kg:.3f} kg."
+        else:
+            return f"Applied {applied:.3f} kg lime. Remaining bin: {self.state.lime_bin_kg:.3f} kg."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def plant_seed(self, seed_type, row_spacing_cm: float = 2.0, depth_cm: float = 2.0,
+                   in_row_spacing_cm: float = 2.0):
         """
         Plant a seed of the given type at the rover's current grid cell.
 
@@ -1051,31 +1760,29 @@ class GroundRover(COREApp[GroundRoverState]):
         Returns:
             str: Result message or error if bin is empty, env is missing, or cell is occupied.
         """
-        self.set_planter_config(row_spacing_cm=row_spacing_cm, depth_cm=depth_cm,in_row_spacing_cm=in_row_spacing_cm)
+        self.set_planter_config(row_spacing_cm=row_spacing_cm, depth_cm=depth_cm, in_row_spacing_cm=in_row_spacing_cm)
         available = int(self.state.seed_bin.get(seed_type, 0))
         if available <= 0:
             return f"Error: no {seed_type} seeds in bin."
 
         x, y = int(round(float(self.state.position[0]))), int(round(float(self.state.position[1])))
 
-        land = self.farm_state.get_land_at(self.state.position[0] , self.state.position[1])
-        if land is None:
-            return "Error: no land at current position."
-
+        land = self.farm_state.get_land_at(self.state.position[0], self.state.position[1])
         planted_count = 0
-        for yy in range(y-land.origin[1], land.height):
-            if available <= 0:
-                break
-            cell = land.grid[x-land.origin[0]][yy]
-            if cell.plant is not None:
-                continue  # Skip occupied cells
-            new_plant = Plant(species=seed_type, planting_date=self.farm_state.time)
-            cell.plant = new_plant
-            available -= 1
-            planted_count += 1
+        if land is not None:
+            for yy in range(y - land.origin[1], land.height):
+                if available <= 0:
+                    break
+                cell = land.grid[x - land.origin[0]][yy]
+                if cell.plant is not None:
+                    continue  # Skip occupied cells
+                new_plant = Plant(species=seed_type, planting_date=self.farm_state.time)
+                cell.plant = new_plant
+                available -= 1
+                planted_count += 1
 
         self.state.seed_bin[seed_type] = available
-        return f"Planted {planted_count} '{seed_type}' seeds along the row. Remaining {seed_type} seeds: {self.state.seed_bin[seed_type]}"
+        return f"Planted '{seed_type}' seeds along the row. Remaining {seed_type} seeds: {self.state.seed_bin.get(seed_type, 0)}"
 
     @type_check
     @app_tool()
@@ -1098,6 +1805,107 @@ class GroundRover(COREApp[GroundRoverState]):
         cell.plant = None
         return f"Harvested plant at {cell.position}. Estimated yield: {estimated_yield:.3f} kg."
 
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def thin_plants(self, land_name, target_density):
+        """
+        Thin (remove excess) plants to achieve target plant density.
+
+        Args:
+            land_name (str): land identifier.
+            target_density (float): Target density (plants per m²).
+
+        Returns:
+            str: Result message if success
+        """
+        land = self.farm_state.lands[land_name]
+        if land is None:
+            return "Error: Rover not in a valid land area."
+        land.density_per_m2 = target_density
+
+        return f"Thinned successfully plants in {land_name}. Current density: {target_density}."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def set_device_status(self, status, fault_message=''):
+        """
+        Set the operational status of the device.
+
+        Args:
+            status (str): 'available', 'unavailable', or 'maintenance'
+            fault_message (str): Optional fault description
+
+        Returns:
+            str: Status update confirmation
+        """
+        self.state.operational_status = status
+        self.state.fault_message = fault_message
+        return f"Device {self.state.device_id} status set to {status}. {fault_message}"
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def emergency_stop(self, fault_message):
+        """
+        Perform emergency stop and mark device as unavailable.
+
+        Args:
+            fault_message (str): Description of the fault that triggered emergency stop
+
+        Returns:
+            str: Emergency stop confirmation with fault details
+        """
+        self.state.operational_status = 'unavailable'
+        self.state.fault_message = fault_message
+        return f"EMERGENCY STOP: {self.state.device_id} halted. Fault: {fault_message}. Device marked unavailable and awaiting service."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def harvest(self, crop_species):
+        """
+        Harvest all plants of the specified crop species in the current land.
+
+        Args:
+            crop_species (str): Crop species to harvest (e.g., 'soybean', 'corn', 'wheat')
+
+        Returns:
+            str: Harvest report with total yield and plant count
+        """
+        if self.state.operational_status == 'unavailable':
+            return f"Error: Cannot harvest - device unavailable: {self.state.fault_message}"
+
+        land = self.farm_state.get_land_at(self.state.position[0], self.state.position[1])
+        if land is None:
+            return "Error: Rover not in a valid land area."
+
+        # Harvest all plants of specified species
+        harvested_count = 0
+        total_yield_kg = 0.0
+
+        for x in range(land.width):
+            for y in range(land.height):
+                cell = land.grid[x][y]
+                if cell.plant is not None and cell.plant.species == crop_species:
+                    # Calculate yield based on plant health and height
+                    plant = cell.plant
+                    yield_kg = plant.height_cm * plant.health * 0.01  # Simplified yield model
+                    total_yield_kg += yield_kg
+                    harvested_count += 1
+                    # Remove harvested plant
+                    cell.plant = None
+
+        if harvested_count == 0:
+            return f"No {crop_species} plants found to harvest in {land.name}."
+
+        return f"Harvested {harvested_count} {crop_species} plants from {land.name}. Total yield: {total_yield_kg:.2f} kg. Average yield per plant: {total_yield_kg/harvested_count:.2f} kg."
+
 
 class IrrigationSystem(COREApp[IrrigationSystemState]):
     """IrrigationSystem (灌溉系统)
@@ -1110,10 +1918,10 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
       - water_pressure_psi: 水压（psi）
       - master_valve_status: 主阀门开关
     """
-    init_state : IrrigationSystemState = IrrigationSystemState(water_pressure_psi=40.0, master_valve_status=False,
+    init_state: IrrigationSystemState = IrrigationSystemState(water_pressure_psi=40.0, master_valve_status=False,
                                                               zone_valve_status={})
 
-    def __init__(self, farm_state:HitFarmState=None):
+    def __init__(self, farm_state: HitFarmState = None):
         super().__init__()
         self.farm_state = farm_state
 
@@ -1121,13 +1929,14 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def open_valve(self, land_name, duration_minutes=45):
+    def open_valve(self, land_name, duration_minutes=45.0,water_depth_cm:float = 3.0):
         """
         Open a zone valve, optionally scheduling an automatic close time.
 
         Args:
             land_name (str): Land identifier, e.g., A1
             duration_minutes (float ): If provided, set an 'open_until' timestamp.defaults to 45 minutes from now.
+            water_depth_cm(float): target water depth default 3.0 cm
 
         Returns:
             str: Result message; also ensures the master valve is open.
@@ -1149,7 +1958,7 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
         if not self.state.master_valve_status:
             self.state.master_valve_status = True
 
-        self.farm_state.lands.get(land_name).water_depth = 3.0
+        self.farm_state.lands.get(land_name).water_depth = water_depth_cm
         self.farm_state.lands.get(land_name).MDA = 0.2
 
         return f"Valve {land_name} opened. Master valve: {self.state.master_valve_status}."
@@ -1181,25 +1990,27 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
     @type_check
     @app_tool()
     @data_tool()
-    @event_registered(operation_type=OperationType.READ)
-    def check_and_auto_close(self):
+    @event_registered(operation_type=OperationType.WRITE)
+    def drain_field(self, land_name):
         """
-        Check all valves with an 'open_until' and close those whose timeout has elapsed.
+        Drain water from a field (set water depth to 0).
+
+        Args:
+            land_name (str): Land identifier (e.g., 'B1').
 
         Returns:
-            list[str | int]: Zone IDs that were auto-closed during this check.
+            str: Result message.
         """
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        changed = []
-        for zid, entry in list(self.state.zone_valve_status.items()):
-            if entry.get('open') and entry.get('open_until'):
-                if now >= entry['open_until']:
-                    entry['open'] = False
-                    entry['open_until'] = None
-                    self.state.zone_valve_status[zid] = entry
-                    changed.append(zid)
-        return changed
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return f"Error: Land {land_name} not found."
+
+
+        # Drain the field
+        previous_depth = land.water_depth
+        land.water_depth = 0.0
+
+        return f"Drained {land_name}. Water depth reduced from {previous_depth:.2f} cm to 0 cm."
 
 
 class SensorNetwork(COREApp[SensorNetworkState]):
@@ -1219,17 +2030,13 @@ class SensorNetwork(COREApp[SensorNetworkState]):
       - get_temperature(x, y): 获取温度
       - get_nutrient_level(x, y): 获取养分
       - get_plant_status(x, y): 查询植物状态
-      - get_data(sensor_ids): 带宽受限的批量读取
+      - get_soil_pH(x, y): 获取土壤pH值
     """
-    init_state : SensorNetworkState=SensorNetworkState(last_reading_timestamp=None,cached_data={})
+    init_state: SensorNetworkState = SensorNetworkState(last_reading_timestamp=None, cached_data={})
 
-    def __init__(self, farm_state :HitFarmState):
+    def __init__(self, farm_state: HitFarmState):
         super().__init__()
         self.farm_state = farm_state
-        self.zone_depths = {
-            "B1": 2.0,
-        }
-
     @type_check
     @app_tool()
     @data_tool()
@@ -1260,14 +2067,14 @@ class SensorNetwork(COREApp[SensorNetworkState]):
         except Exception:
             return None
         if land is not None:
-            return land.grid[xi-land.origin[0]][yi-land.origin[1]]
+            return land.grid[xi - land.origin[0]][yi - land.origin[1]]
         return None
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_water_depth(self,land_name:str):
+    def get_water_depth(self, land_name: str):
         """
         Return water depth at the specified irrigation land.
 
@@ -1277,14 +2084,13 @@ class SensorNetwork(COREApp[SensorNetworkState]):
         Returns:
             float | None: Water depth in cm, or None if unavailable.
         """
-
         return self.farm_state.lands.get(land_name).water_depth
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_land_MDA(self,land_name:str):
+    def get_land_MDA(self, land_name: str):
         """
         Return land MDA at the specified land.
 
@@ -1296,8 +2102,6 @@ class SensorNetwork(COREApp[SensorNetworkState]):
         """
 
         return self.farm_state.lands.get(land_name).MDA
-
-
 
     @type_check
     @app_tool()
@@ -1367,73 +2171,152 @@ class SensorNetwork(COREApp[SensorNetworkState]):
             dict | None: Nutrient mapping (e.g., {'nitrogen': ...}), or None if unavailable.
         """
         cell = self._cell_at(x, y)
-        if cell is not None:
-            from datetime import datetime, timezone
-            self.last_reading_timestamp = datetime.now(timezone.utc)
-            return dict(cell.nutrient_level)
-        # 回退：尝试从缓存数据中读取
-        for sid, data in self.state.cached_data.items():
-            if 'nutrient_level' in data:
-                return dict(data['nutrient_level'])
-        return None
+        return cell.nutrient_level.get('nitrogen')
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_plant_status(self, x, y):
+    def get_plant_status(self, x,y):
         """
-        Query whether a plant exists at (x, y) and return simple status flags.
+        Query whether a plant exists at (x, y) and return plant status.
 
         Args:
             x (int | float): X coordinate.
             y (int | float): Y coordinate.
 
         Returns:
-            dict: Status with keys {position, emerged, mature, height_cm}.
+            dict: Status with keys :
+            growth_stage: plant growth stage
+            maturity : maturity index (0-1)
+            mature : if plant is mature
         """
         cell = self._cell_at(x, y)
-        status = {"position": None, "emerged": False, "mature": False, "height_cm": 0.0}
+        status = {"growth_stage": "seeding", "mature": False}
         if cell is None:
             return status
-        status["position"] = cell.position
         if cell.plant is not None:
-            status["emerged"] = True
-            try:
-                status["height_cm"] = float(getattr(cell.plant, "height_cm", 0.0))
-                status["mature"] = status["height_cm"] >= 150.0
-            except Exception:
-                pass
+            status["growth_stage"] = getattr(cell.plant, "growth_stage", "seeding")
+            status["mature"] = getattr(cell.plant, "mature", False)
+            status["maturity"] = getattr(cell.plant, "maturity_index", False)
         return status
 
     @type_check
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_data(self, sensor_ids: list[str]) -> dict[str, dict]:
+    def get_soil_pH(self, x, y):
         """
-        Fetch multiple sensor payloads with a bandwidth limit of at most 10 IDs.
+        Return soil pH at (x, y), preferring live env data over cached values.
 
         Args:
-            sensor_ids (list[str]): Sensor IDs to fetch (max 10).
+            x (int | float): X coordinate.
+            y (int | float): Y coordinate.
 
         Returns:
-            dict: Mapping of sensor_id to cached payload; returns {'error': str} on invalid input.
+            float | None: Soil pH value (typically 4.0-9.0), or None if unavailable.
         """
-        try:
-            if len(sensor_ids) > 10:
-                return {"error": "Too many sensors requested; max 10 per minute."}
-        except Exception:
-            return {"error": "sensor_ids must be a list of strings"}
-        result: dict[str, dict] = {}
-        for sid in sensor_ids:
-            data = self.state.cached_data.get(sid)
-            if data is not None:
-                result[sid] = dict(data)
-        return result
+        cell = self._cell_at(x, y)
+        if cell is not None:
+            from datetime import datetime, timezone
+            self.last_reading_timestamp = datetime.now(timezone.utc)
+            return float(getattr(cell, 'soil_pH', 5.2))
+        # Fallback: check cached data
+        for sid, data in self.state.cached_data.items():
+            if 'soil_pH' in data:
+                return float(data['soil_pH'])
+        return None
 
 
-class HitFarmState(App):
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def check_pest_infestation(self, land_name: str, pest_type: str):
+        """
+        Check pest infestation level in a land.
+
+        Args:
+            land_name (str): Land identifier.
+            pest_type (str): Type of pest (e.g., 'aphid', 'brown_planthopper').
+
+        Returns:
+            dict: Pest infestation level and affected plant count.
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        pests = getattr(land.grid[0][0], 'pests', {})
+        severity = pests.get(pest_type, 0.0)
+
+        return {
+            'land_name': land_name,
+            'pest_type': pest_type,
+            'average_severity': severity
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def get_smoke_level(self, x, y):
+        """
+        Get smoke level at specified coordinates (for fire detection).
+
+        Args:
+            x (int | float): X coordinate
+            y (int | float): Y coordinate
+
+        Returns:
+            dict: Smoke detection data with level and alarm status
+        """
+        cell = self._cell_at(x, y)
+        smoke_level = 0.0
+
+        if cell is not None:
+            # Check for smoke attribute in cell (set by simulation/environment)
+            smoke_level = getattr(cell, 'smoke_level', 0.0)
+
+        # Smoke levels: 0.0 = none, 0.1-0.3 = light, 0.3-0.7 = moderate, >0.7 = severe
+        alarm_status = 'none'
+        if smoke_level > 0.7:
+            alarm_status = 'severe'
+        elif smoke_level > 0.3:
+            alarm_status = 'moderate'
+        elif smoke_level > 0.1:
+            alarm_status = 'light'
+
+        return {
+            'position': (x, y),
+            'smoke_level': round(smoke_level, 3),
+            'alarm_status': alarm_status,
+            'threshold_exceeded': smoke_level > 0.3,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+
+@dataclass
+class HitFarmStateState:
+    land_layout = {
+        'A1': {'size': (30, 30), 'origin': (0, 0)},
+        'A2': {'size': (30, 25), 'origin': (35, 0)},
+        'A3': {'size': (24, 24), 'origin': (70, 0)},
+        'A4': {'size': (40, 20), 'origin': (0, 32)},
+        'A5': {'size': (30, 30), 'origin': (42, 32)},
+        # Additional blocks to support scenarios B/C/D
+        'B1': {'size': (28, 28), 'origin': (75, 32)},
+        'B2': {'size': (28, 24), 'origin': (105, 32)},
+        'B3': {'size': (26, 26), 'origin': (135, 32)},
+        'C1': {'size': (30, 26), 'origin': (75, 62)},
+        'C2': {'size': (30, 26), 'origin': (108, 62)},
+        'C4': {'size': (28, 24), 'origin': (140, 62)},
+        'D1': {'size': (30, 26), 'origin': (0, 90)},
+        'D2': {'size': (30, 26), 'origin': (35, 90)},
+        'D3': {'size': (28, 24), 'origin': (68, 90)},
+    }
+
+class HitFarmState(COREApp[HitFarmStateState]):
     """HitFarmState（仿真环境-多地块）
 
     中文: 维护五个地块（A1–A5）、中央基地 CentralHub、无人机/地面机器人/灌溉/传感网络，并提供时间推进与状态导出。
@@ -1446,29 +2329,17 @@ class HitFarmState(App):
       - _execute_action(agent_action): 将动作分派到实体的方法上
       - get_state(): 返回当前仿真状态（含多地块汇总与 CentralHub 位置）
     """
-
+    init_state:HitFarmStateState = HitFarmStateState()
     def __init__(self, land_size=(100, 100), initial_conditions=None):
-        super().__init__("HitFarmState")
+        super().__init__()
         if initial_conditions is None:
             initial_conditions = {}
 
         # ---- Five lands with names, sizes, and world origins (reasonable defaults) ----
-        self.land_layout = {
-            'A1': {'size': (30, 30), 'origin': (0, 0)},
-            'A2': {'size': (30, 25), 'origin': (35, 0)},
-            'A3': {'size': (24, 24), 'origin': (70, 0)},
-            'A4': {'size': (40, 20), 'origin': (0, 32)},
-            'A5': {'size': (30, 30), 'origin': (42, 32)},
-            # Additional blocks to support scenarios B/C/D
-            'B1': {'size': (28, 28), 'origin': (75, 32)},
-            'B2': {'size': (28, 24), 'origin': (105, 32)},
-            'C1': {'size': (30, 26), 'origin': (75, 62)},
-            'D1': {'size': (30, 26), 'origin': (0, 62)},
-            'D2': {'size': (30, 26), 'origin': (35, 62)},
-        }
+
         self.lands: dict[str, Land] = {
             lid: Land(name=lid, width=meta['size'][0], height=meta['size'][1], origin=meta['origin'])
-            for lid, meta in self.land_layout.items()
+            for lid, meta in self.state.land_layout.items()
         }
 
         # ---- Subsystems (registered later; allow multiples) ----
@@ -1501,7 +2372,6 @@ class HitFarmState(App):
         except Exception:
             pass
         self.rovers.append(rover)
-
 
     def register_central_hub(self, hub: CentralHub) -> None:
         self.central_hubs.append(hub)
@@ -1538,13 +2408,13 @@ class HitFarmState(App):
     def irrigation_system(self):
         return self.irrigation_systems[0] if self.irrigation_systems else None
 
-    def get_rover(self,device_id:str) -> GroundRover | None:
+    def get_rover(self, device_id: str) -> GroundRover | None:
         for r in self.rovers:
             if r.state.device_id == device_id:
                 return r
         return self.rovers[0]
 
-    def get_drone(self, device_id: str) -> Drone |None:
+    def get_drone(self, device_id: str) -> Drone | None:
         for d in self.drones:
             if d.state.device_id == device_id:
                 return d
