@@ -4,6 +4,7 @@ from are.simulation.apps.synkrasis_core.hit_farm import IrrigationSystem, Sensor
 from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios19: Irrigation vs. rain forecast conflict (corn field MAD=52%).
@@ -22,8 +23,8 @@ class CustomScenario(COREScenario):
                                                   {"time": 0, "precipitation_probability": 70},
                                                   {"time": 0, "precipitation_probability": 70}])
         state = HitFarmState()
-        irrigation = IrrigationSystem(farm_state = state)
-        sensors = SensorNetwork(farm_state = state)
+        irrigation = IrrigationSystem(farm_state=state)
+        sensors = SensorNetwork(farm_state=state)
         self.apps = [agui, state, weather, irrigation, sensors]
 
     def build_events_flow(self) -> None:
@@ -40,17 +41,14 @@ class CustomScenario(COREScenario):
             schedule = state.schedule_in("2 hours").oracle().depends_on(weather_forecast, delay_seconds=1)
             weather_current = weather.get_current_weather().oracle().depends_on(schedule, delay_seconds=2)
             sensor_mad = sensor.get_land_MAD(land_name="A1").oracle().depends_on(weather_current, delay_seconds=1)
-            e_open = irrigation.open_valve(land_name="A1",MAD=0.3).oracle().depends_on(sensor_mad, delay_seconds=1)
+            e_open = irrigation.open_valve(land_name="A1", MAD=0.3).oracle().depends_on(sensor_mad, delay_seconds=1)
             sensor_mad_2 = sensor.get_land_MAD(land_name="A1").oracle().depends_on(weather_current, delay_seconds=1)
             e_close = irrigation.close_valve(land_name="A1").oracle().depends_on(e_open, delay_seconds=1)
 
-        self.events = [e0, weather_forecast,schedule, weather_current, sensor_mad, e_open,sensor_mad_2, e_close]
-
-
+        self.events = [e0, weather_forecast, schedule, weather_current, sensor_mad, e_open, sensor_mad_2, e_close]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

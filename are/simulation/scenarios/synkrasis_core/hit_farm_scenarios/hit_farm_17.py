@@ -22,14 +22,13 @@ class CustomScenario(COREScenario):
         agui = AgentUserInterface()
         state = HitFarmState()
         land = state.lands["B2"]
-        land.plant_land(plant = Plant(species="rice", growth_stage="3-4 leaf",mature=False))
+        land.plant_land(plant=Plant(species="rice", growth_stage="3-4 leaf", mature=False))
         irrigation = IrrigationSystem(farm_state=state)
         sensors = SensorNetwork(farm_state=state)
 
-
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui, state,irrigation,sensors]
+        self.apps = [agui, state, irrigation, sensors]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -43,25 +42,22 @@ class CustomScenario(COREScenario):
             # Get coordinates for B2
             o1 = state.get_coordinates(land_name="B2").oracle().depends_on(e0, delay_seconds=1)
             (x, y) = state.lands["B2"].origin
-            o2=sensors.get_plant_status(x=x, y=y).oracle().depends_on(o1, delay_seconds=1)
-
+            o2 = sensors.get_plant_status(x=x, y=y).oracle().depends_on(o1, delay_seconds=1)
 
             o3 = sensors.get_water_depth(land_name="B2").oracle().depends_on(o2, delay_seconds=1)
 
             # Open valve to fill to 5 cm (using land_name parameter)
-            o4 = irrigation.open_valve(land_name="B2",water_depth_cm=5.0).oracle().depends_on(o3, delay_seconds=1)
+            o4 = irrigation.open_valve(land_name="B2", water_depth_cm=5.0).oracle().depends_on(o3, delay_seconds=1)
 
             o5 = sensors.get_water_depth(land_name="B2").oracle().depends_on(o4, delay_seconds=1)
-
 
             # Close valve after reaching target
             o7 = irrigation.close_valve(land_name="B2").oracle().depends_on(o5, delay_seconds=1)
 
-        self.events = [e0, o1,o2, o3, o4, o5, o7]
+        self.events = [e0, o1, o2, o3, o4, o5, o7]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

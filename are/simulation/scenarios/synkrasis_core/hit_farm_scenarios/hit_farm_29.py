@@ -33,7 +33,8 @@ class RiceBPHControl(COREScenario):
         state.register_central_hub(hub)
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui, state] + state.drones + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
+        self.apps = [agui,
+                     state] + state.drones + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -50,7 +51,8 @@ class RiceBPHControl(COREScenario):
             # Get coordinates for B2
             info = state.get_coordinates(land_name="B2").oracle().depends_on(e0, delay_seconds=1)
 
-            o_bph_check =  sensors.check_pest_infestation(land_name ="B2" , pest_type="bph").oracle().depends_on(e0, delay_seconds=1)
+            o_bph_check = sensors.check_pest_infestation(land_name="B2", pest_type="bph").oracle().depends_on(e0,
+                                                                                                              delay_seconds=1)
 
             # Refill pesticide (pymetrozine, 20 L/ha equivalent to 20000 ml/ha, assume ~560 ml for B2 area)
             o_refill = hub.refill_pesticide(device_id=drone.state.device_id, amount_ml=1000.0).oracle().depends_on(
@@ -58,8 +60,6 @@ class RiceBPHControl(COREScenario):
             # Drone pesticide application
             # Takeoff
             o_takeoff = drone.takeoff().oracle().depends_on(o_refill, delay_seconds=1)
-
-
 
             # Fly to B2
             (x, y) = state.lands["B2"].origin
@@ -74,7 +74,7 @@ class RiceBPHControl(COREScenario):
 
             # Establish 3 cm water layer
             o_water_before = sensors.get_water_depth(land_name="B2").oracle().depends_on(o_land, delay_seconds=1)
-            o_open_valve = irrigation.open_valve(land_name="B2",water_depth_cm=3.0).oracle().depends_on(
+            o_open_valve = irrigation.open_valve(land_name="B2", water_depth_cm=3.0).oracle().depends_on(
                 o_water_before, delay_seconds=1)
 
             # Monitor water depth to ensure 3 cm
@@ -85,10 +85,10 @@ class RiceBPHControl(COREScenario):
             o_water_24h = sensors.get_water_depth(land_name="B2").oracle().depends_on(o_close_valve, delay_seconds=1)
 
         self.events = [e0, info, o_bph_check, o_takeoff, o_refill, o_fly, o_spray, o_return, o_land,
-                      o_water_before, o_open_valve, o_water_check, o_close_valve, o_water_24h]
+                       o_water_before, o_open_valve, o_water_check, o_close_valve, o_water_24h]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(RiceBPHControl())
 
+    run_and_validate(RiceBPHControl())

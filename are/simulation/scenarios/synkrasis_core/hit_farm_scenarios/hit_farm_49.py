@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios49: Check if hail has occurred. After hail, in plot D1,
@@ -41,8 +42,7 @@ class CustomScenario(COREScenario):
         d1_land = state.lands.get('D1')
         d1_land.density_per_m2 = 4.0
 
-
-        self.apps = [agui, state, rover, hub, weather,drone]
+        self.apps = [agui, state, rover, hub, weather, drone]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -71,10 +71,10 @@ class CustomScenario(COREScenario):
             o_land = drone.land().oracle().depends_on(o_return_drone, delay_seconds=1)
             # Get D1 coordinates
 
-
             # Load wheat seeds for replanting
-            o_load = hub.refill_seeds(device_id=rover.state.device_id, seed_type="wheat", count=500).oracle().depends_on(
-               o_estimate, delay_seconds=1)
+            o_load = hub.refill_seeds(device_id=rover.state.device_id, seed_type="wheat",
+                                      count=500).oracle().depends_on(
+                o_estimate, delay_seconds=1)
 
             # Move to D1
             o_move = rover.move_to(x=x, y=y).oracle().depends_on(o_load, delay_seconds=1)
@@ -92,5 +92,5 @@ class CustomScenario(COREScenario):
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

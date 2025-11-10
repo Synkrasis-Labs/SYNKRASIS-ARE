@@ -35,12 +35,13 @@ class CustomScenario(COREScenario):
 
             o_coordinate_1 = state.get_coordinates(land_name="A1").oracle().depends_on(e0, delay_seconds=0)
             (x, y) = state.lands["A1"].origin
-            o_refill_2 = hub.refill_fertilizer(device_id=rover.state.device_id, amount_kg=50.0).oracle().depends_on(e0,delay_seconds=1)
+            o_refill_2 = hub.refill_fertilizer(device_id=rover.state.device_id, amount_kg=50.0).oracle().depends_on(e0,
+                                                                                                                    delay_seconds=1)
             o_move_2 = rover.move_to(x=x, y=y).oracle().depends_on(o_refill_2, delay_seconds=1)
             o_band = rover.apply_fertilizer(kg=50.0).oracle().depends_on(o_move_2, delay_seconds=0)
 
             o_return_2 = rover.return_to_base().oracle().depends_on(o_band, delay_seconds=1)
-        self.events = [e0,o_coordinate_1, o_refill_2, o_move_2, o_band, o_return_2]
+        self.events = [e0, o_coordinate_1, o_refill_2, o_move_2, o_band, o_return_2]
 
 
 if __name__ == "__main__":

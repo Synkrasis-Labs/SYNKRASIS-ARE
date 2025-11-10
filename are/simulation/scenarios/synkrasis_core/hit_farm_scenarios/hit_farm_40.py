@@ -8,7 +8,6 @@ from are.simulation.types import EventRegisterer
 
 
 class CustomScenario(COREScenario):
-
     prompt: str | None = (
         "growth monitoring: drone takeoff, fly over plots A1 A2 A3 in sequence and inspect    "
         "During task if navigate back to central hub to recharge; once charged, resume weeding from interrupted coordinates."
@@ -22,13 +21,14 @@ class CustomScenario(COREScenario):
         hub = CentralHub(farm_state=state)
         state.register_drone(drone)
         state.register_central_hub(hub)
-        self.apps = [agui, state] + state.drones + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
+        self.apps = [agui,
+                     state] + state.drones + state.rovers + state.central_hubs + state.irrigation_systems + state.sensor_networks
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
         drone = self.get_typed_app(Drone)
         state = self.get_typed_app(HitFarmState)
-        hub =  self.get_typed_app(CentralHub)
+        hub = self.get_typed_app(CentralHub)
 
         with EventRegisterer.capture_mode():
             # 用户意图触发 / User intent trigger
@@ -44,7 +44,7 @@ class CustomScenario(COREScenario):
 
             o_fly1 = drone.fly_to(x=x, y=y).oracle().depends_on([info1, o_takeoff1], delay_seconds=2)
             o_inspect1 = drone.inspect_plot(x=x, y=y).oracle().depends_on(o_fly1,
-                                                                         delay_seconds=1)
+                                                                          delay_seconds=1)
             captured.extend([info1, o_fly1, o_inspect1])
 
             info2 = state.get_coordinates(land_name="A2").oracle().depends_on(e0, delay_seconds=1)
@@ -52,7 +52,7 @@ class CustomScenario(COREScenario):
             o_fly2 = drone.fly_to(x=x, y=y).oracle().depends_on([info2, o_inspect1], delay_seconds=2)
             # 相机巡检（高分辨率） / Camera inspection (high resolution)
             o_inspect2 = drone.inspect_plot(x=x, y=y).oracle().depends_on(o_fly2,
-                                                                         delay_seconds=1)
+                                                                          delay_seconds=1)
             captured.extend([info2, o_fly2, o_inspect2])
 
             return_base1 = drone.drone_return_to_base().oracle().depends_on(o_inspect2, delay_seconds=2)
@@ -67,7 +67,7 @@ class CustomScenario(COREScenario):
 
             o_fly3 = drone.fly_to(x=x, y=y).oracle().depends_on([info3, o_takeoff2], delay_seconds=2)
             # 相机巡检（高分辨率） / Camera inspection (high resolution)
-            o_inspect3= drone.inspect_plot(x=x, y=y).oracle().depends_on(o_fly3,
+            o_inspect3 = drone.inspect_plot(x=x, y=y).oracle().depends_on(o_fly3,
                                                                           delay_seconds=1)
             captured.extend([info3, o_fly3, o_inspect3])
             # 巡检结束后降落 / Land after inspections
@@ -81,5 +81,5 @@ class CustomScenario(COREScenario):
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

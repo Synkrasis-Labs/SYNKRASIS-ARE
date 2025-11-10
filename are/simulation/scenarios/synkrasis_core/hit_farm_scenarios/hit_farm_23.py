@@ -77,11 +77,11 @@ class CustomScenario(COREScenario):
             o_land = drone.land().oracle().depends_on(o_return_final, delay_seconds=1)
 
         self.events = [e0, info, o_takeoff, o_fly, o_weed_density, o_species_id,
-                      o_return_for_refill, o_refill, o_fly_back, o_apply_pesticide,
-                      o_return_final, o_land]
+                       o_return_for_refill, o_refill, o_fly_back, o_apply_pesticide,
+                       o_return_final, o_land]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

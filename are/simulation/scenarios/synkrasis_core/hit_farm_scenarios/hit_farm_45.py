@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios45: After confirming that A4 has no crops in the field, remove all plant stubble.
@@ -64,5 +65,5 @@ class CustomScenario(COREScenario):
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

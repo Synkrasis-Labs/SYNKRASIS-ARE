@@ -48,7 +48,7 @@ class CustomScenario(COREScenario):
             info = state.get_coordinates(land_name="C1").oracle().depends_on(e0, delay_seconds=1)
             (x, y) = state.lands["C1"].origin
             # Set initial moisture for seedbed preparation
-            e_moist = sensors.get_soil_moisture(x,y).oracle().depends_on(info, delay_seconds=1)
+            e_moist = sensors.get_soil_moisture(x, y).oracle().depends_on(info, delay_seconds=1)
 
             # Refill pesticide at hub first
             o_pesticide = hub.refill_pesticide(device_id=drone.state.device_id, amount_ml=500.0).oracle().depends_on(
@@ -63,17 +63,19 @@ class CustomScenario(COREScenario):
             e_land = drone.land().oracle().depends_on(e_return, delay_seconds=1)
 
             # Load seeds and plant soybeans 38 cm rows, 5 cm depth, 10 cm spacing
-            e_load_hub = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean", count=1200).oracle().depends_on(e_land, delay_seconds=1)
+            e_load_hub = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean",
+                                          count=1200).oracle().depends_on(e_land, delay_seconds=1)
 
             o_move = rover.move_to(x=x, y=y).oracle().depends_on([info, e_load_hub], delay_seconds=1)
-            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0, in_row_spacing_cm=10.0).oracle().depends_on(o_move, delay_seconds=0)
+            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0,
+                                       in_row_spacing_cm=10.0).oracle().depends_on(o_move, delay_seconds=0)
             o_return = rover.return_to_base().oracle().depends_on(o_plant, delay_seconds=1)
 
-        self.events = [e0, info, e_moist, e_takeoff, o_pesticide, e_fly, e_apply, e_return, e_land, e_load_hub, o_move, o_plant, o_return]
+        self.events = [e0, info, e_moist, e_takeoff, o_pesticide, e_fly, e_apply, e_return, e_land, e_load_hub, o_move,
+                       o_plant, o_return]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

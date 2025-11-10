@@ -67,14 +67,13 @@ class CustomScenario(COREScenario):
 
             o_thin = rover.thin_plants(land_name="A1", target_density=5.0).oracle().depends_on(o_move, delay_seconds=1)
 
-
             o_return_rover = rover.return_to_base().oracle().depends_on(o_thin, delay_seconds=1)
 
         self.events = [e0, info, o_takeoff, o_fly, o_plant_density, o_return_drone, o_land,
-                      o_move, o_thin, o_return_rover]
+                       o_move, o_thin, o_return_rover]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

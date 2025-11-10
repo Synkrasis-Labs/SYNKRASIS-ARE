@@ -21,7 +21,7 @@ class CustomScenario(COREScenario):
     def init_and_populate_apps(self, *args, **kwargs) -> None:
         agui = AgentUserInterface()
         state = HitFarmState()
-        rover = GroundRover(device_id="GroundRover",farm_state=state)
+        rover = GroundRover(device_id="GroundRover", farm_state=state)
         rover.state.fault_message = "engine failure"
         hub = CentralHub(farm_state=state)
 
@@ -41,15 +41,16 @@ class CustomScenario(COREScenario):
 
             # Get A4 coordinates
             (x, y) = state.lands["A4"].origin
-            o_1 = hub.refill_fertilizer(device_id="GroundRover",amount_kg=50.0).oracle().depends_on(e0, delay_seconds=1)
+            o_1 = hub.refill_fertilizer(device_id="GroundRover", amount_kg=50.0).oracle().depends_on(e0,
+                                                                                                     delay_seconds=1)
             info = state.get_coordinates(land_name="A4").oracle().depends_on(e0, delay_seconds=1)
             # Move to A4
-            e1 = rover.move_to(x=x, y=y).oracle().depends_on([info,o_1], delay_seconds=1)
+            e1 = rover.move_to(x=x, y=y).oracle().depends_on([info, o_1], delay_seconds=1)
             e2 = rover.apply_fertilizer(kg=50.0).oracle().depends_on(e1, delay_seconds=2)
 
             e2 = rover.report_emergency_stop().oracle().depends_on(e1, delay_seconds=2)
 
-        self.events = [e0, o_1,info,e1, e2]
+        self.events = [e0, o_1, info, e1, e2]
 
 
 if __name__ == "__main__":

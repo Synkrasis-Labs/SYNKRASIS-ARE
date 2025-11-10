@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios42: Wheat harvesting and straw processing are completed on D4,
@@ -66,29 +67,33 @@ class CustomScenario(COREScenario):
             o_check = sensors.get_plant_status(x=x, y=y).oracle().depends_on(info, delay_seconds=1)
 
             # Harvest wheat (straw processing included)
-            o_harvest = rover.harvest(crop_species='wheat').oracle().depends_on([o_check,o_move_harvest], delay_seconds=2)
+            o_harvest = rover.harvest(crop_species='wheat').oracle().depends_on([o_check, o_move_harvest],
+                                                                                delay_seconds=2)
 
             # Return to base to unload
             o_return = rover.return_to_base().oracle().depends_on(o_harvest, delay_seconds=1)
 
             # Load soybean seeds
-            o_load_seeds = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean", count=1500).oracle().depends_on(
+            o_load_seeds = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean",
+                                            count=1500).oracle().depends_on(
                 o_return, delay_seconds=1)
 
             # Return to D4 for sowing
             o_move_plant = rover.move_to(x=x, y=y).oracle().depends_on(o_load_seeds, delay_seconds=1)
 
             # Direct-sow soybeans
-            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0, in_row_spacing_cm=10.0).oracle().depends_on(
+            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0,
+                                       in_row_spacing_cm=10.0).oracle().depends_on(
                 o_move_plant, delay_seconds=2)
-
 
             # Final return
             o_return_final = rover.return_to_base().oracle().depends_on(o_plant, delay_seconds=1)
 
-        self.events = [e0, info, o_move_harvest, o_check, o_harvest, o_return, o_load_seeds, o_move_plant, o_plant, o_return_final]
+        self.events = [e0, info, o_move_harvest, o_check, o_harvest, o_return, o_load_seeds, o_move_plant, o_plant,
+                       o_return_final]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())

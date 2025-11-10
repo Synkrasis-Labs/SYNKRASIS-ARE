@@ -15,10 +15,10 @@ class CustomScenario(COREScenario):
     """
 
     prompt: str | None = ("execute following tasks in sequence: "
-        "Land A1: Check if the corn is in the V12 growth stage, if so, apply 30kg of fertilizer. "
-        "Land D2: Check if the wheat is in the heading growth stage, if so, apply 50kg of fertilizer. "
-        "Land C1: Check if the soybean is in the R2 growth stage, if so, apply 40kg of fertilizer."
-    )
+                          "Land A1: Check if the corn is in the V12 growth stage, if so, apply 30kg of fertilizer. "
+                          "Land D2: Check if the wheat is in the heading growth stage, if so, apply 50kg of fertilizer. "
+                          "Land C1: Check if the soybean is in the R2 growth stage, if so, apply 40kg of fertilizer."
+                          )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
         agui = AgentUserInterface()
@@ -97,13 +97,13 @@ class CustomScenario(COREScenario):
             o_return_final = rover.return_to_base().oracle().depends_on(o_apply_c1, delay_seconds=1)
 
         self.events = [e0,
-                      info_a1, o_check_a1, o_refill_a1, o_move_a1, o_apply_a1,
-                      info_d2, o_return_1, o_check_d2, o_refill_d2, o_move_d2, o_apply_d2,
-                      info_c1, o_return_2, o_check_c1, o_refill_c1, o_move_c1, o_apply_c1,
-                      o_return_final]
+                       info_a1, o_check_a1, o_refill_a1, o_move_a1, o_apply_a1,
+                       info_d2, o_return_1, o_check_d2, o_refill_d2, o_move_d2, o_apply_d2,
+                       info_c1, o_return_2, o_check_c1, o_refill_c1, o_move_c1, o_apply_c1,
+                       o_return_final]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

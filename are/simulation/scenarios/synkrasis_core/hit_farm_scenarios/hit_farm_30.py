@@ -67,7 +67,7 @@ class CustomScenario(COREScenario):
             # Return to base, refill, spray
             e5 = drone.drone_return_to_base().oracle().depends_on(e4, delay_seconds=1)
             e7 = hub.refill_pesticide(device_id=drone.state.device_id, amount_ml=300.0).oracle().depends_on(e5,
-                                                                                                           delay_seconds=1)
+                                                                                                            delay_seconds=1)
 
             # Apply pesticide
             e8 = drone.takeoff().oracle().depends_on(e7, delay_seconds=1)

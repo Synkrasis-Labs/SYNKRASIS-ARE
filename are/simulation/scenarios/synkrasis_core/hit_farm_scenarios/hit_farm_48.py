@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios48: In plot A1, use Drone sampling to estimate corn density;
@@ -72,7 +73,8 @@ class CustomScenario(COREScenario):
             # Drone estimates corn density
             o_takeoff = drone.takeoff().oracle().depends_on(info, delay_seconds=1)
             o_fly = drone.fly_to(x=x, y=y).oracle().depends_on(o_takeoff, delay_seconds=1)
-            o_estimate = drone.estimate_plant_density(crop_species='corn', land_name='A1', sampling_density='medium').oracle().depends_on(
+            o_estimate = drone.estimate_plant_density(crop_species='corn', land_name='A1',
+                                                      sampling_density='medium').oracle().depends_on(
                 o_fly, delay_seconds=2)
 
             # Return drone to base
@@ -88,17 +90,18 @@ class CustomScenario(COREScenario):
             o_move = rover.move_to(x=x, y=y).oracle().depends_on(o_load, delay_seconds=1)
 
             # Replant to fill gaps
-            o_replant = rover.plant_seed(seed_type='corn', row_spacing_cm=75.0, depth_cm=5.0, in_row_spacing_cm=25.0).oracle().depends_on(
+            o_replant = rover.plant_seed(seed_type='corn', row_spacing_cm=75.0, depth_cm=5.0,
+                                         in_row_spacing_cm=25.0).oracle().depends_on(
                 o_move, delay_seconds=1)
 
             # Return to base
             o_return = rover.return_to_base().oracle().depends_on(o_replant, delay_seconds=1)
 
         self.events = [e0, info, o_takeoff, o_fly, o_estimate, o_return_drone, o_land,
-                      o_load, o_move, o_move, o_replant, o_return]
+                       o_load, o_move, o_move, o_replant, o_return]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

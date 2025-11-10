@@ -668,6 +668,7 @@ class Plant:
         self.mature = mature
         self.status = status
         self.maturity_index = 0.0  # 0-1, where 1.0 = fully mature
+        self.moisture_content = 0.17
 
     def grow(self, time_delta_seconds, moisture, nutrients):
         self.age_days += time_delta_seconds / (24 * 3600)
@@ -1568,7 +1569,7 @@ class GroundRover(COREApp[GroundRoverState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def return_to_base(self):
+    def  return_to_base(self):
         """
         Move the rover back to the central hub position.
 
@@ -2288,6 +2289,7 @@ class SensorNetwork(COREApp[SensorNetworkState]):
             growth_stage: plant growth stage
             maturity : maturity index (0-1)
             mature : if plant is mature
+            moisture_content:the grains moisture content
         """
         cell = self._cell_at(x, y)
         status = {"growth_stage": "seeding", "mature": False}
@@ -2297,6 +2299,7 @@ class SensorNetwork(COREApp[SensorNetworkState]):
             status["growth_stage"] = getattr(cell.plant, "growth_stage", "seeding")
             status["mature"] = getattr(cell.plant, "mature", False)
             status["maturity"] = getattr(cell.plant, "maturity_index", False)
+            status["moisture_content"] = getattr(cell.plant, "moisture_content", False)
         return status
 
     @type_check

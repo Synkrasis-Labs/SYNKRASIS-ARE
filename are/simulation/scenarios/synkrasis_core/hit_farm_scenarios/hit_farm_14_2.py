@@ -45,7 +45,7 @@ class CustomScenario(COREScenario):
             info = state.get_coordinates(land_name="C1").oracle().depends_on(e0, delay_seconds=1)
             (x, y) = state.lands["C1"].origin
             # Set initial moisture for seedbed preparation
-            e_moist = sensors.get_soil_moisture(x,y).oracle().depends_on(info, delay_seconds=1)
+            e_moist = sensors.get_soil_moisture(x, y).oracle().depends_on(info, delay_seconds=1)
 
             # Refill pesticide at hub first
             o_pesticide = hub.refill_pesticide(device_id=drone.state.device_id, amount_ml=500.0).oracle().depends_on(
@@ -64,6 +64,5 @@ class CustomScenario(COREScenario):
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

@@ -21,7 +21,7 @@ class CustomScenario(COREScenario):
 
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui,irrigation, sensors]
+        self.apps = [agui, irrigation, sensors]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -42,15 +42,13 @@ class CustomScenario(COREScenario):
             # Check initial water depth
             o3 = sensors.get_water_depth(land_name="B2").oracle().depends_on(o2, delay_seconds=1)
 
-
             # Close valve after reaching target
             o4 = irrigation.close_valve(land_name="B2").oracle().depends_on(o3, delay_seconds=1)
 
-        self.events = [e0,  o1, o2, o3, o4]
+        self.events = [e0, o1, o2, o3, o4]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

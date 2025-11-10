@@ -58,10 +58,10 @@ class CustomScenario(COREScenario):
                 # 飞行到目标点 / Fly to target point
                 info = state.get_coordinates(land_name=key).oracle().depends_on(e0, delay_seconds=1)
 
-                o_fly = drone.fly_to(x=x, y=y).oracle().depends_on([info,o_takeoff], delay_seconds=2)
+                o_fly = drone.fly_to(x=x, y=y).oracle().depends_on([info, o_takeoff], delay_seconds=2)
                 # 相机巡检（高分辨率） / Camera inspection (high resolution)
                 o_inspect = drone.inspect_plot(x=x, y=y).oracle().depends_on(o_fly,
-                                                                                                      delay_seconds=1)
+                                                                             delay_seconds=1)
                 captured.extend([info, o_fly, o_inspect])
                 last = o_inspect
 
@@ -69,7 +69,7 @@ class CustomScenario(COREScenario):
             return_base = drone.drone_return_to_base().oracle().depends_on(last, delay_seconds=2)
 
             o_land = drone.land().oracle().depends_on(last, delay_seconds=2)
-            captured.extend([return_base,o_land])
+            captured.extend([return_base, o_land])
 
         # 将事件列表保存供 runner/UI 使用 / Save event list for runner/UI
         self.events = captured

@@ -71,10 +71,10 @@ class CustomScenario(COREScenario):
                 o_land, delay_seconds=2)
 
         self.events = [e0, info, o_check_1, o_refill, o_takeoff, o_fly,
-                      o_spray, o_return, o_land, o_verify]
+                       o_spray, o_return, o_land, o_verify]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

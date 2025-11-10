@@ -39,23 +39,22 @@ class CustomScenario(COREScenario):
                                         count=2000).oracle().depends_on(
                 e0, delay_seconds=1)
 
-
             o_coordinate_1 = state.get_coordinates(land_name="D1").oracle().depends_on(e0, delay_seconds=0)
             (x, y) = state.lands["D1"].origin
-            o_move_1 = rover.move_to(x=x, y=y).oracle().depends_on([o_coordinate_1,oracle_1], delay_seconds=1)
+            o_move_1 = rover.move_to(x=x, y=y).oracle().depends_on([o_coordinate_1, oracle_1], delay_seconds=1)
             o_plant_1 = rover.plant_seed(seed_type="wheat", row_spacing_cm=20.0, depth_cm=3.8,
                                          in_row_spacing_cm=8.0).oracle().depends_on(o_move_1, delay_seconds=0)
 
             o_coordinate_2 = state.get_coordinates(land_name="D2").oracle().depends_on(e0, delay_seconds=0)
             (x, y) = state.lands["D2"].origin
-            o_move_2 = rover.move_to(x=x, y=y).oracle().depends_on([o_coordinate_2,oracle_1], delay_seconds=1)
+            o_move_2 = rover.move_to(x=x, y=y).oracle().depends_on([o_coordinate_2, oracle_1], delay_seconds=1)
             o_plant_2 = rover.plant_seed(seed_type="wheat", row_spacing_cm=20.0, depth_cm=3.8,
                                          in_row_spacing_cm=8.0).oracle().depends_on(o_move_2, delay_seconds=0)
 
             # Return to base
             o_return = rover.return_to_base().oracle().depends_on([o_plant_1, o_plant_2], delay_seconds=1)
 
-        self.events = [e0, oracle_1,o_coordinate_1, o_move_1, o_plant_1,o_coordinate_2, o_move_2, o_plant_2, o_return]
+        self.events = [e0, oracle_1, o_coordinate_1, o_move_1, o_plant_1, o_coordinate_2, o_move_2, o_plant_2, o_return]
 
 
 if __name__ == "__main__":

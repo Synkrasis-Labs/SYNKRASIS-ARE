@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios43: In the A1 corn plot, mechanical weeding was performed first,
@@ -50,7 +51,8 @@ class CustomScenario(COREScenario):
 
             # Step 1: Rover performs mechanical weeding
             o_move_rover = rover.move_to(x=x, y=y).oracle().depends_on(info, delay_seconds=1)
-            o_mechanical_weed = rover.mechanical_weeding(land_name="A1").oracle().depends_on(o_move_rover, delay_seconds=2)
+            o_mechanical_weed = rover.mechanical_weeding(land_name="A1").oracle().depends_on(o_move_rover,
+                                                                                             delay_seconds=2)
             o_rover_return = rover.return_to_base().oracle().depends_on(o_mechanical_weed, delay_seconds=1)
 
             # Step 2: Drone identifies escaped weeds
@@ -73,16 +75,16 @@ class CustomScenario(COREScenario):
             o_spray = drone.apply_pesticide(area="A1", amount_ml=800.0).oracle().depends_on(
                 o_fly_spray, delay_seconds=2)
 
-
             # Final return
             o_final_return = drone.drone_return_to_base().oracle().depends_on(o_spray, delay_seconds=1)
             o_final_land = drone.land().oracle().depends_on(o_final_return, delay_seconds=1)
 
         self.events = [e0, info, o_move_rover, o_mechanical_weed, o_rover_return, o_takeoff, o_fly_inspect,
-                      o_identify_weeds, o_drone_return, o_land_refill, o_refill, o_takeoff_spray,
-                      o_fly_spray, o_spray, o_final_return, o_final_land]
+                       o_identify_weeds, o_drone_return, o_land_refill, o_refill, o_takeoff_spray,
+                       o_fly_spray, o_spray, o_final_return, o_final_land]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())

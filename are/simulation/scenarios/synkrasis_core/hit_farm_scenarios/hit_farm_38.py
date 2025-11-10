@@ -65,7 +65,7 @@ class CustomScenario(COREScenario):
             o_reverify = drone.detect_bird_flock(land_name="B3").oracle().depends_on(o_fly_2, delay_seconds=1)
 
         self.events = [e0, info, o_takeoff, o_fly, o_detect, o_sound,
-                       o_schedule, o_fly_2, o_reverify ]
+                       o_schedule, o_fly_2, o_reverify]
 
 
 if __name__ == "__main__":

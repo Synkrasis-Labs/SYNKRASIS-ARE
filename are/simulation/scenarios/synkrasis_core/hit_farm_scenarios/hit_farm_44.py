@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios44: Plant soybeans in C2 land. 48 hours later, apply a pre-emergent herbicide.
@@ -45,14 +46,16 @@ class CustomScenario(COREScenario):
             (x, y) = state.lands["C2"].origin
 
             # Load soybean seeds
-            o_load = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean", count=1200).oracle().depends_on(
+            o_load = hub.refill_seeds(device_id=rover.state.device_id, seed_type="soybean",
+                                      count=1200).oracle().depends_on(
                 info, delay_seconds=1)
 
             # Move to C2
             o_move = rover.move_to(x=x, y=y).oracle().depends_on(o_load, delay_seconds=1)
 
             # Plant soybeans
-            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0, in_row_spacing_cm=10.0).oracle().depends_on(
+            o_plant = rover.plant_seed(seed_type="soybean", row_spacing_cm=38.0, depth_cm=5.0,
+                                       in_row_spacing_cm=10.0).oracle().depends_on(
                 o_move, delay_seconds=2)
 
             # Return to base after planting
@@ -76,10 +79,10 @@ class CustomScenario(COREScenario):
             o_land = drone.land().oracle().depends_on(o_return_2, delay_seconds=1)
 
         self.events = [e0, info, o_load, o_move, o_plant, o_return_1, o_schedule, o_refill,
-                      o_takeoff, o_fly, o_spray, o_return_2, o_land]
+                       o_takeoff, o_fly, o_spray, o_return_2, o_land]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())

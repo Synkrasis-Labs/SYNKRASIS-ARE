@@ -22,7 +22,7 @@ class CustomScenario(COREScenario):
         sensors = SensorNetwork(farm_state=state)
         state.register_irrigation_system(irrigation)
         state.register_sensor_network(sensors)
-        self.apps = [agui, state,irrigation,sensors]
+        self.apps = [agui, state, irrigation, sensors]
 
     def build_events_flow(self) -> None:
         agui = self.get_typed_app(AgentUserInterface)
@@ -37,7 +37,7 @@ class CustomScenario(COREScenario):
             o_mda_before = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e0, delay_seconds=1)
 
             # Open valve to irrigate (using land_name parameter)
-            e_open = irrigation.open_valve(land_name="A2",MAD = 0.3).oracle().depends_on(o_mda_before, delay_seconds=1)
+            e_open = irrigation.open_valve(land_name="A2", MAD=0.3).oracle().depends_on(o_mda_before, delay_seconds=1)
 
             # Check water depth during irrigation
             o_monitor = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e_open, delay_seconds=1)
@@ -48,11 +48,10 @@ class CustomScenario(COREScenario):
             # Get final MAD reading to confirm
             o_mda_after = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e_close, delay_seconds=1)
 
-            self.events = [e0,o_mda_before, e_open, o_monitor, e_close, o_mda_after]
+            self.events = [e0, o_mda_before, e_open, o_monitor, e_close, o_mda_after]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
+
     run_and_validate(CustomScenario())
-
-

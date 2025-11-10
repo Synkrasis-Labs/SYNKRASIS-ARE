@@ -6,6 +6,7 @@ from are.simulation.scenarios.core_scenario import COREScenario
 from are.simulation.scenarios.utils.registry import register_scenario
 from are.simulation.types import EventRegisterer
 
+
 class CustomScenario(COREScenario):
     """
     scenarios50: Harvest plot D2 first; in parallel, scout A1 for fall_armyworm.
@@ -82,7 +83,8 @@ class CustomScenario(COREScenario):
             # Drone scouts A1 for FAW (in parallel)
             o_takeoff = drone.takeoff().oracle().depends_on(info_a1, delay_seconds=1)
             o_fly_scout = drone.fly_to(x=x_a1, y=y_a1).oracle().depends_on(o_takeoff, delay_seconds=1)
-            o_scout = drone.assess_pest_activity(land_name='A1', pest_type='fall_armyworm', sampling_density='high').oracle().depends_on(
+            o_scout = drone.assess_pest_activity(land_name='A1', pest_type='fall_armyworm',
+                                                 sampling_density='high').oracle().depends_on(
                 o_fly_scout, delay_seconds=2)
 
             # Drone returns to base after scouting
@@ -108,11 +110,11 @@ class CustomScenario(COREScenario):
             o_final_land = drone.land().oracle().depends_on(o_final_return, delay_seconds=1)
 
         self.events = [e0, info_d2, info_a1, o_move_harvest, o_harvest, o_takeoff, o_fly_scout, o_scout,
-                      o_return_drone, o_land, o_return_rover, o_refill, o_takeoff_spray, o_fly_spray,
-                      o_spray, o_final_return, o_final_land]
+                       o_return_drone, o_land, o_return_rover, o_refill, o_takeoff_spray, o_fly_spray,
+                       o_spray, o_final_return, o_final_land]
 
 
 if __name__ == "__main__":
     from are.simulation.scenarios.utils.cli_utils import run_and_validate
-    run_and_validate(CustomScenario())
 
+    run_and_validate(CustomScenario())
