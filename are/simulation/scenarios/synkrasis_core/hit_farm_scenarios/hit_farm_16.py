@@ -12,7 +12,7 @@ class CustomScenario(COREScenario):
     """
 
     prompt: str | None = (
-        "A2: MAD=53% (>50%) → irrigate to field capacity; monitor and stop at target(MAD<30%); recheck."
+        "A2: MAD=53% (>50%) → irrigate to field capacity; monitor and stop at target(MAD=30%); recheck."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
@@ -34,19 +34,19 @@ class CustomScenario(COREScenario):
             e0 = agui.send_message_to_agent(content=self.prompt).depends_on(None, delay_seconds=1)
 
             # Get initial MAD reading
-            o_mda_before = sensors.get_land_MDA(land_name="A2").oracle().depends_on(e0, delay_seconds=1)
+            o_mda_before = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e0, delay_seconds=1)
 
             # Open valve to irrigate (using land_name parameter)
-            e_open = irrigation.open_valve(land_name="A2", duration_minutes=60).oracle().depends_on(o_mda_before, delay_seconds=1)
+            e_open = irrigation.open_valve(land_name="A2",MAD = 0.3).oracle().depends_on(o_mda_before, delay_seconds=1)
 
             # Check water depth during irrigation
-            o_monitor = sensors.get_land_MDA(land_name="A2").oracle().depends_on(e_open, delay_seconds=1)
+            o_monitor = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e_open, delay_seconds=1)
 
             # Close valve after irrigation
             e_close = irrigation.close_valve(land_name="A2").oracle().depends_on(o_monitor, delay_seconds=1)
 
             # Get final MAD reading to confirm
-            o_mda_after = sensors.get_land_MDA(land_name="A2").oracle().depends_on(e_close, delay_seconds=1)
+            o_mda_after = sensors.get_land_MAD(land_name="A2").oracle().depends_on(e_close, delay_seconds=1)
 
             self.events = [e0,o_mda_before, e_open, o_monitor, e_close, o_mda_after]
 

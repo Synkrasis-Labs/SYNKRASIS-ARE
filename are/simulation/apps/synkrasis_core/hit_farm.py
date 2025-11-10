@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from are.simulation.apps.app import App
 from are.simulation.apps.core_app import COREApp
 from are.simulation.types import event_registered
 from are.simulation.tool_utils import OperationType, app_tool, data_tool
@@ -370,24 +369,13 @@ class WeatherApp(COREApp[WeatherState]):
         Returns:
             list[dict] | str: List of forecast entries or error message.
         """
-        try:
-            hours = int(hours)
-        except (TypeError, ValueError):
-            return "Error: hours must be an integer."
+        result = self.state.forecast_data[:hours]
+        self.state.forecast_data  = [{"time": 0, "precipitation_probability": 10},
+                                                  {"time": 0, "precipitation_probability": 10},
+                                                  {"time": 0, "precipitation_probability": 10}]
+        return result
 
-        if hours <= 0:
-            return "Error: hours must be positive."
-
-        if hours > 168:
-            hours = 168  # Cap at 7 days
-
-        # Generate or return cached forecast data
-        if not self.state.forecast_data or len(self.state.forecast_data) < hours:
-            self.generate_forecast(hours)
-
-        return self.state.forecast_data[:hours]
-
-    def generate_forecast(self, hours: int, forecast_entry: dict | None = None):
+    def generate_forecast(self, forecast_entry: list[dict] | None = None):
         """
         Generate synthetic weather forecast data.
 
@@ -395,42 +383,8 @@ class WeatherApp(COREApp[WeatherState]):
             hours (int): Number of hours to generate forecast for.
         """
         if forecast_entry:
-            self.state.forecast_data = [forecast_entry]
-            return
+            self.state.forecast_data = forecast_entry
 
-        import random
-
-        self.state.forecast_data = []
-
-        # Use current weather as starting point
-        temp = self.state.temperature_celsius
-        humidity = self.state.humidity_percent
-        wind = self.state.wind_speed_mps
-
-        for i in range(hours):
-            # Add some random variation
-            temp += random.uniform(-2, 2)
-            temp = max(0, min(40, temp))  # Clamp between 0-40°C
-
-            humidity += random.uniform(-5, 5)
-            humidity = max(20, min(100, humidity))
-
-            wind += random.uniform(-1, 1)
-            wind = max(0, min(20, wind))
-
-            forecast_entry = {
-                "time": i,
-                "temperature_celsius": round(temp, 1),
-                "humidity_percent": round(humidity, 1),
-                "wind_speed_mps": round(wind, 1),
-                "precipitation_probability": random.randint(0, 100),
-            }
-            self.state.forecast_data.append(forecast_entry)
-
-    @type_check
-    @app_tool()
-    @data_tool()
-    @event_registered(operation_type=OperationType.WRITE)
     def update_weather(self, temperature_celsius: float | None = None,
                        humidity_percent: float | None = None,
                        wind_speed_mps: float | None = None,
@@ -474,10 +428,6 @@ class WeatherApp(COREApp[WeatherState]):
 
         return self.get_current_weather()
 
-    @type_check
-    @app_tool()
-    @data_tool()
-    @event_registered(operation_type=OperationType.WRITE)
     def add_weather_alert(self, alert_type: str, severity: str, message: str, duration_hours: int = 24):
         """
         Add a weather alert/warning.
@@ -537,10 +487,7 @@ class WeatherApp(COREApp[WeatherState]):
 
         return active_alerts
 
-    @type_check
-    @app_tool()
-    @data_tool()
-    @event_registered(operation_type=OperationType.WRITE)
+
     def clear_weather_alerts(self):
         """
         Clear all weather alerts.
@@ -556,50 +503,30 @@ class WeatherApp(COREApp[WeatherState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_agricultural_recommendations(self):
+    def check_hail_event(self):
         """
-        Get agricultural recommendations based on current weather conditions.
+        Check if a hail event has occurred or is in recent alerts.
 
         Returns:
-            dict: Recommendations for farming operations.
+            dict: Hail event status and details
         """
-        recommendations = {
-            "irrigation": "normal",
-            "pesticide_application": "suitable",
-            "planting": "suitable",
-            "harvesting": "suitable",
-            "notes": []
+        active_alerts = self.get_weather_alerts()
+
+        hail_detected = False
+        hail_severity = "none"
+
+        for alert in active_alerts:
+            if "hail" in alert.get("type", "").lower() or "hail" in alert.get("message", "").lower():
+                hail_detected = True
+                hail_severity = alert.get("severity", "unknown")
+                break
+
+        return {
+            "hail_detected": hail_detected,
+            "severity": hail_severity,
+            "status": "hail_event_occurred" if hail_detected else "no_hail",
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
-
-        # Check temperature
-        if self.state.temperature_celsius < 5:
-            recommendations["planting"] = "not recommended"
-            recommendations["notes"].append("Temperature too low for planting.")
-        elif self.state.temperature_celsius > 35:
-            recommendations["irrigation"] = "increased"
-            recommendations["notes"].append("High temperature - increase irrigation.")
-
-        # Check wind speed
-        if self.state.wind_speed_mps > 8:
-            recommendations["pesticide_application"] = "not suitable"
-            recommendations["notes"].append("Wind speed too high for pesticide application.")
-
-        # Check precipitation
-        if self.state.precipitation_mm > 5:
-            recommendations["irrigation"] = "not needed"
-            recommendations["pesticide_application"] = "not suitable"
-            recommendations["harvesting"] = "postpone"
-            recommendations["notes"].append("Rainfall detected - postpone outdoor operations.")
-
-        # Check humidity
-        if self.state.humidity_percent > 85:
-            recommendations["notes"].append("High humidity - monitor for fungal diseases.")
-        elif self.state.humidity_percent < 30:
-            recommendations["irrigation"] = "increased"
-            recommendations["notes"].append("Low humidity - increase irrigation frequency.")
-
-        return recommendations
-
 
 class Land:
     """Land（土地图）
@@ -622,7 +549,7 @@ class Land:
         self.width = int(width)
         self.height = int(height)
         self.water_depth = 0.0
-        self.MDA = 0.52
+        self.MAD = 0.52
         self.default_species = None
         self.density_per_m2 = 5.2
         self.grid = [[GridCell(x, y, land_name=self.name, origin=self.origin)
@@ -784,7 +711,7 @@ class Drone(COREApp[DroneState]):
     """
     init_state: DroneState = DroneState(position=(15.0, -5.0, 0.0), speed_mps=10.0, consumption_rate=0.5,
                                         battery_percentage=100.0, pesticide_tank_ml=0.0, flight_status='landed',
-                                        device_id=None, pesticide_tank_capacity=None)
+                                        device_id="Drone", pesticide_tank_capacity=None)
 
     def __init__(self, farm_state=None):
         super().__init__()
@@ -894,63 +821,6 @@ class Drone(COREApp[DroneState]):
     @type_check
     @app_tool()
     @data_tool()
-    @event_registered(operation_type=OperationType.READ)
-    def preflight_check(self, simulate_fault=None):
-        """
-        Perform pre-flight system check including motors, sensors, battery, and communication.
-
-        Args:
-            simulate_fault (str, optional): Simulate a specific fault for testing (e.g., "Motor #3 speed deviation").
-
-        Returns:
-            dict: Check results with status and any detected issues.
-        """
-        checks = {
-            'battery': 'PASS',
-            'motors': 'PASS',
-            'sensors': 'PASS',
-            'communication': 'PASS',
-            'gps': 'PASS'
-        }
-
-        issues = []
-
-        # Check operational status
-        if self.state.operational_status == 'unavailable':
-            return {
-                'status': 'FAIL',
-                'message': f"Device unavailable: {self.state.fault_message}",
-                'checks': checks,
-                'issues': [self.state.fault_message]
-            }
-
-        # Battery check
-        if self.state.battery_percentage < 20:
-            checks['battery'] = 'FAIL'
-            issues.append(f"Low battery: {self.state.battery_percentage}%")
-
-        # Simulate fault if requested (for testing scenarios)
-        if simulate_fault:
-            checks['motors'] = 'FAIL'
-            issues.append(simulate_fault)
-            self.state.operational_status = 'unavailable'
-            self.state.fault_message = simulate_fault
-
-        overall_status = 'PASS' if not issues else 'FAIL'
-
-        return {
-            'status': overall_status,
-            'message': 'All systems nominal' if not issues else 'Pre-flight check failed',
-            'checks': checks,
-            'issues': issues,
-            'device_id': self.state.device_id,
-            'battery': self.state.battery_percentage,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-
-    @type_check
-    @app_tool()
-    @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
     def set_device_status(self, status, fault_message=''):
         """
@@ -978,7 +848,7 @@ class Drone(COREApp[DroneState]):
         Returns:
             str: Result message or an error if already flying or battery is too low.
         """
-        if self.state.operational_status == 'unavailable':
+        if self.state.operational_status == 'unavailable' or self.state.fault_message:
             return f"Error: Cannot takeoff - device unavailable: {self.state.fault_message}"
         if self.state.flight_status == 'flying':
             return "Already flying."
@@ -1104,7 +974,6 @@ class Drone(COREApp[DroneState]):
 
         # Calculate survey requirements
         reqs = self._calculate_survey_requirements(land, x, y, sampling_density)
-
         # Check if battery is sufficient
         if not reqs['sufficient_battery']:
             return {
@@ -1130,8 +999,6 @@ class Drone(COREApp[DroneState]):
             'distance_flown': round(reqs['total_distance'], 2),
             'battery_used': round(reqs['battery_cost'], 2),
             'battery_remaining': round(self.state.battery_percentage, 2),
-            'flight_pattern': 'S-shaped (row-by-row with alternating direction)',
-            'timestamp': datetime.now(timezone.utc).isoformat()
         }
         return obs
 
@@ -1460,9 +1327,7 @@ class Drone(COREApp[DroneState]):
             'high_risk_species_present': any(sp["risk"] == "high" for sp in detected_species),
             'distance_flown': round(reqs['total_distance'], 2),
             'battery_used': round(reqs['battery_cost'], 2),
-            'battery_remaining': round(self.state.battery_percentage, 2),
-            'flight_pattern': 'S-shaped (row-by-row with alternating direction)',
-            'timestamp': datetime.now(timezone.utc).isoformat()
+            'battery_remaining': round(self.state.battery_percentage, 2)
         }
 
     @type_check
@@ -1510,6 +1375,109 @@ class Drone(COREApp[DroneState]):
             'density_per_m2': round(land.density_per_m2, 2),
         }
 
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def detect_wildlife(self, land_name):
+        """
+        Detect wildlife (e.g., deer) in a land area during patrol.
+
+        Args:
+            land_name (str): Land identifier to patrol
+
+        Returns:
+            dict: Wildlife detection results
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        # Simulate wildlife detection
+        # In real scenario, this would use camera/thermal imaging
+        wildlife_detected = True  # Simulated detection
+
+        return {
+            "land_name": land_name,
+            "wildlife_type": "deer",
+            "detected": wildlife_detected,
+            "herd_size": 8,
+            "location": (land.origin[0] + 10, land.origin[1] + 10),
+            "threat_level": "moderate"
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def drive_away_wildlife(self, x, y):
+        """
+        Drive away wildlife by flying in aggressive pattern.
+
+        Args:
+            x (float): X coordinate of wildlife location
+            y (float): Y coordinate of wildlife location
+
+        Returns:
+            str: Drive-away action result
+        """
+        if self.state.flight_status != 'flying':
+            return "Error: Drone must be flying to perform drive-away action."
+
+        # Fly to location and perform drive-away maneuver
+        return f"Wildlife drive-away action executed at ({x}, {y}). Hovering and creating disturbance."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def detect_bird_flock(self, land_name):
+        """
+        Detect and assess bird flock size.
+
+        Args:
+            land_name (str): Land identifier to inspect
+
+        Returns:
+            dict: Bird flock detection and assessment
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        # Simulate bird flock detection
+        flock_size = 150  # Simulated flock size
+        threshold = 100
+
+        return {
+            "land_name": land_name,
+            "flock_id": f"flock_{land_name}",
+            "flock_size": flock_size,
+            "threshold": threshold,
+            "threshold_exceeded": flock_size > threshold,
+            "location": (land.origin[0] + 5, land.origin[1] + 5),
+            "species": "mixed_species"
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def sound_dispersal(self, area):
+        """
+        Activate sound dispersal system to disperse birds.
+
+        Args:
+            area (str): Area identifier where dispersal is performed
+
+        Returns:
+            str: Sound dispersal activation confirmation
+        """
+        if self.state.flight_status != 'flying':
+            return "Error: Drone must be flying to perform sound dispersal."
+
+        return f"Sound dispersal system activated over {area}. Acoustic deterrent active."
+
 
 @dataclass
 class GroundRoverState:
@@ -1526,6 +1494,9 @@ class GroundRoverState:
     })
     operational_status: str = 'available'  # available, unavailable, maintenance
     fault_message: str = ''  # Stores fault/error messages
+    hopper_capacity_kg: float = 10000.0  # Harvest hopper capacity
+    hopper_load_kg: float = 0.0  # Current hopper load
+    last_harvest_position: tuple[float, float] | None = None  # Resume position after unloading
 
 
 class GroundRover(COREApp[GroundRoverState]):
@@ -1684,8 +1655,10 @@ class GroundRover(COREApp[GroundRoverState]):
             kg (float): Kilograms requested to apply.
 
         Returns:
-            str: Result message with applied mass and remaining bin.
+            str: Result message with applied mass and remaining bin. Or error fault_message.
         """
+        if self.state.fault_message:
+            return "Error: cannot work due to fault - " + self.state.fault_message
         try:
             amount = float(kg)
         except Exception:
@@ -1831,38 +1804,15 @@ class GroundRover(COREApp[GroundRoverState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def set_device_status(self, status, fault_message=''):
+    def report_emergency_stop(self):
         """
-        Set the operational status of the device.
-
-        Args:
-            status (str): 'available', 'unavailable', or 'maintenance'
-            fault_message (str): Optional fault description
-
-        Returns:
-            str: Status update confirmation
-        """
-        self.state.operational_status = status
-        self.state.fault_message = fault_message
-        return f"Device {self.state.device_id} status set to {status}. {fault_message}"
-
-    @type_check
-    @app_tool()
-    @data_tool()
-    @event_registered(operation_type=OperationType.WRITE)
-    def emergency_stop(self, fault_message):
-        """
-        Perform emergency stop and mark device as unavailable.
-
-        Args:
-            fault_message (str): Description of the fault that triggered emergency stop
+        report emergency stop and mark device as unavailable.
 
         Returns:
             str: Emergency stop confirmation with fault details
         """
         self.state.operational_status = 'unavailable'
-        self.state.fault_message = fault_message
-        return f"EMERGENCY STOP: {self.state.device_id} halted. Fault: {fault_message}. Device marked unavailable and awaiting service."
+        return f"EMERGENCY STOP: {self.state.device_id} halted. Device marked unavailable."
 
     @type_check
     @app_tool()
@@ -1886,7 +1836,6 @@ class GroundRover(COREApp[GroundRoverState]):
             return "Error: Rover not in a valid land area."
 
         # Harvest all plants of specified species
-        harvested_count = 0
         total_yield_kg = 0.0
 
         for x in range(land.width):
@@ -1895,16 +1844,154 @@ class GroundRover(COREApp[GroundRoverState]):
                 if cell.plant is not None and cell.plant.species == crop_species:
                     # Calculate yield based on plant health and height
                     plant = cell.plant
+                    if not plant:
+                        continue
                     yield_kg = plant.height_cm * plant.health * 0.01  # Simplified yield model
                     total_yield_kg += yield_kg
-                    harvested_count += 1
-                    # Remove harvested plant
+                    if  total_yield_kg>self.state.hopper_capacity_kg:
+                        return f"Hopper capacity is full. Current coordinates: ({land.origin[0]+x}, {land.origin[1]+y}). Please unload hopper before continuing harvest."
                     cell.plant = None
+                    # Remove harvested plant
 
-        if harvested_count == 0:
-            return f"No {crop_species} plants found to harvest in {land.name}."
+        return f"Harvested {total_yield_kg} kg {crop_species} plants from {land.name}."
 
-        return f"Harvested {harvested_count} {crop_species} plants from {land.name}. Total yield: {total_yield_kg:.2f} kg. Average yield per plant: {total_yield_kg/harvested_count:.2f} kg."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def unload_hopper(self):
+        """
+        Unload hopper at central hub.
+
+        Returns:
+            str: Unload confirmation message
+        """
+
+        unloaded_kg = self.state.hopper_load_kg
+        self.state.hopper_load_kg = 0.0
+
+        return f"Unloaded {unloaded_kg:.2f} kg from hopper. Hopper now empty."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def mechanical_weeding(self, land_name):
+        """
+        Perform mechanical weeding in crop rows.
+
+        Args:
+            land_name (str): Land identifier where weeding is performed
+
+        Returns:
+            str: Weeding operation result
+        """
+        return f"Mechanical weeding completed in {land_name}.Most of the weeds have been cleared, but there are still residues."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def check_field_empty(self, land_name):
+        """
+        Check if a field has no living crops (only stubble/residue may remain).
+
+        Args:
+            land_name (str): Land identifier to check
+
+        Returns:
+            dict: Field status including crop count and residue presence
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return {"error": f"Land {land_name} not found."}
+
+        living_crop_count = 0
+        for x in range(land.width):
+            for y in range(land.height):
+                cell = land.grid[x][y]
+                if cell.plant is not None:
+                    living_crop_count += 1
+
+        return {
+            "land_name": land_name,
+            "living_crops": living_crop_count,
+            "field_empty": living_crop_count == 0,
+            "status": "empty" if living_crop_count == 0 else "has_crops"
+        }
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def remove_stubble(self, land_name):
+        """
+        Remove all plant stubble and residue from a field.
+
+        Args:
+            land_name (str): Land identifier where stubble will be removed
+
+        Returns:
+            str: Stubble removal confirmation
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return f"Error: Land {land_name} not found."
+
+        stubble_removed = 0
+        for x in range(land.width):
+            for y in range(land.height):
+                cell = land.grid[x][y]
+                if cell.plant is not None:
+                    cell.plant = None
+                    stubble_removed += 1
+
+        return f"Stubble removal completed in {land_name}. Cleared {stubble_removed} residue areas. Field is now clean."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def replant_strips(self, land_name, seed_type, target_density):
+        """
+        Replant strips in areas with stand loss to restore target density.
+
+        Args:
+            land_name (str): Land identifier
+            seed_type (str): Seed type to replant
+            target_density (float): Target plant density (plants per m²)
+
+        Returns:
+            str: Replanting result
+        """
+        land = self.farm_state.lands.get(land_name)
+        if land is None:
+            return f"Error: Land {land_name} not found."
+
+        available_seeds = self.state.seed_bin.get(seed_type, 0)
+        if available_seeds <= 0:
+            return f"Error: No {seed_type} seeds available for replanting."
+
+        # Replant in areas with missing plants
+        replanted_count = 0
+        for x in range(land.width):
+            for y in range(land.height):
+                if available_seeds <= 0:
+                    break
+                cell = land.grid[x][y]
+                if cell.plant is None:
+                    # Replant this spot
+                    from datetime import datetime, timezone
+                    new_plant = Plant(species=seed_type, planting_date=datetime.now(timezone.utc))
+                    cell.plant = new_plant
+                    available_seeds -= 1
+                    replanted_count += 1
+
+        self.state.seed_bin[seed_type] = available_seeds
+        land.density_per_m2 = target_density
+
+        return f"Replanted {replanted_count} {seed_type} plants in {land_name}. Target density {target_density} plants/m² restored."
 
 
 class IrrigationSystem(COREApp[IrrigationSystemState]):
@@ -1929,37 +2016,28 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.WRITE)
-    def open_valve(self, land_name, duration_minutes=45.0,water_depth_cm:float = 3.0):
+    def open_valve(self, land_name, water_depth_cm:float = 3.0, MAD:float = 0.2):
         """
         Open a zone valve, optionally scheduling an automatic close time.
 
         Args:
             land_name (str): Land identifier, e.g., A1
-            duration_minutes (float ): If provided, set an 'open_until' timestamp.defaults to 45 minutes from now.
             water_depth_cm(float): target water depth default 3.0 cm
+            MAD(float): target MDA default 0.2
 
         Returns:
             str: Result message; also ensures the master valve is open.
         """
-        from datetime import datetime, timedelta, timezone
-        now = datetime.now(timezone.utc)
         entry = self.state.zone_valve_status.get(land_name, {})
         entry['open'] = True
-        if duration_minutes is not None:
-            try:
-                mins = float(duration_minutes)
-                entry['open_until'] = now + timedelta(minutes=mins)
-            except Exception:
-                entry['open_until'] = None
-        else:
-            entry['open_until'] = None
+
         self.state.zone_valve_status[land_name] = entry
         # 确保主阀门打开以允许分区供水
         if not self.state.master_valve_status:
             self.state.master_valve_status = True
 
         self.farm_state.lands.get(land_name).water_depth = water_depth_cm
-        self.farm_state.lands.get(land_name).MDA = 0.2
+        self.farm_state.lands.get(land_name).MAD = MAD
 
         return f"Valve {land_name} opened. Master valve: {self.state.master_valve_status}."
 
@@ -2011,6 +2089,26 @@ class IrrigationSystem(COREApp[IrrigationSystemState]):
         land.water_depth = 0.0
 
         return f"Drained {land_name}. Water depth reduced from {previous_depth:.2f} cm to 0 cm."
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
+    def close_all_valves(self):
+        """
+        Emergency close all irrigation valves and master valve.
+
+        Returns:
+            str: Confirmation message
+        """
+        closed_zones = []
+        for zone_id in self.state.zone_valve_status.keys():
+            self.state.zone_valve_status[zone_id] = {'open': False, 'open_until': None}
+            closed_zones.append(zone_id)
+
+        self.state.master_valve_status = False
+
+        return f"Emergency: Closed all irrigation valves. Zones affected: {', '.join(closed_zones)}. Master valve closed."
 
 
 class SensorNetwork(COREApp[SensorNetworkState]):
@@ -2090,18 +2188,18 @@ class SensorNetwork(COREApp[SensorNetworkState]):
     @app_tool()
     @data_tool()
     @event_registered(operation_type=OperationType.READ)
-    def get_land_MDA(self, land_name: str):
+    def get_land_MAD(self, land_name: str):
         """
-        Return land MDA at the specified land.
+        Return land MAD at the specified land.
 
         Args:
             land_name (str): land identifier.
 
         Returns:
-            float | None: MDA value, or None if unavailable.
+            float | None: MAD value, or None if unavailable.
         """
 
-        return self.farm_state.lands.get(land_name).MDA
+        return self.farm_state.lands.get(land_name).MAD
 
     @type_check
     @app_tool()
@@ -2617,3 +2715,15 @@ class HitFarmState(COREApp[HitFarmStateState]):
             if ox <= x < ox + land.width and oy <= y < oy + land.height:
                 return land
         return None
+
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.READ)
+    def schedule_in(self,time :str):
+        """
+        The waiting task will continue after a period of time.
+        Args:
+            time (str): waiting time eg: 2 hours, 30 minutes, 7days etc
+        """
+        return time + "after...."

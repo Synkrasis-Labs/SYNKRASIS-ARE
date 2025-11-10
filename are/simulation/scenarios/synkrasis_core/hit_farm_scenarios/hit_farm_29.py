@@ -12,7 +12,7 @@ class RiceBPHControl(COREScenario):
     """
     scenarios29: 水稻褐飞虱处置 | Rice BPH control
     - Reconfirm BPH counts in B2; if mean ≥22 per hill, apply pymetrozine at 20 L/ha via UAV
-    - Maintain 3 cm flood for 24-48 hours
+    - Maintain 3 cm flood for
     """
 
     prompt: str | None = (
@@ -74,7 +74,7 @@ class RiceBPHControl(COREScenario):
 
             # Establish 3 cm water layer
             o_water_before = sensors.get_water_depth(land_name="B2").oracle().depends_on(o_land, delay_seconds=1)
-            o_open_valve = irrigation.open_valve(land_name="B2", duration_minutes=30).oracle().depends_on(
+            o_open_valve = irrigation.open_valve(land_name="B2",water_depth_cm=3.0).oracle().depends_on(
                 o_water_before, delay_seconds=1)
 
             # Monitor water depth to ensure 3 cm

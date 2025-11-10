@@ -11,7 +11,8 @@ class CustomScenario(COREScenario):
 
     prompt: str | None = (
         "growth monitoring: drone takeoff, fly over plots A1 A2 A3 in sequence and inspect    "
-        "During task if navigate back to central hub to recharge; once charged or threshold reached, resume weeding from interrupted coordinates."
+        "During task if navigate back to central hub to recharge; once charged, resume weeding from interrupted coordinates."
+        "After completing inspect, return to central hub."
     )
 
     def init_and_populate_apps(self, *args, **kwargs) -> None:
@@ -27,7 +28,7 @@ class CustomScenario(COREScenario):
         agui = self.get_typed_app(AgentUserInterface)
         drone = self.get_typed_app(Drone)
         state = self.get_typed_app(HitFarmState)
-        hub = CentralHub(farm_state=state)
+        hub =  self.get_typed_app(CentralHub)
 
         with EventRegisterer.capture_mode():
             # 用户意图触发 / User intent trigger

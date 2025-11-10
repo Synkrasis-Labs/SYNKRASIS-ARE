@@ -142,10 +142,10 @@ class AgentUserInterface(App):
         """
         self._send_message(Sender.AGENT, content)
 
-    # @type_check
-    # @app_tool()
-    # @data_tool()
-    # @event_registered(operation_type=OperationType.WRITE)
+    @type_check
+    @app_tool()
+    @data_tool()
+    @event_registered(operation_type=OperationType.WRITE)
     def send_message_to_user(self, content: str = "") -> str | None:
         """
         Sends a message to the User. This will end the Agent's turn.

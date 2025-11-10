@@ -36,7 +36,7 @@ class CustomScenario(COREScenario):
             o1 = sensors.get_water_depth(land_name="B2").oracle().depends_on(e0, delay_seconds=1)
 
             # Open valve to fill to 5 cm (using land_name parameter)
-            o2 = irrigation.open_valve(land_name="B2", duration_minutes=45, water_depth_cm=5.0).oracle().depends_on(
+            o2 = irrigation.open_valve(land_name="B2", water_depth_cm=5.0).oracle().depends_on(
                 o1, delay_seconds=1)
 
             # Check initial water depth

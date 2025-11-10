@@ -91,19 +91,18 @@ def generate_alphabet(
             if not tool.arguments:
                 alphabet[char] = FunctionCall(name=tool.name, arguments={})
                 continue
-
+            general_arguments = {}
             for arg_name, arg_type in tool.arguments.items():
-                alphabet[char] = FunctionCall(
-                    name=tool.name,
-                    arguments={
-                        arg_name: FunctionArgument(
+                general_arguments[arg_name] = FunctionArgument(
                             name=arg_name,
                             value=None,
                             excluded_values=None,
                             type=arg_type,
                         )
-                    },
-                )
+            alphabet[char] = FunctionCall(
+                name=tool.name,
+                arguments=general_arguments
+            )
 
     return alphabet
 
