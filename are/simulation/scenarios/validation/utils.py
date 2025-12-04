@@ -16,13 +16,15 @@ from .data_structures import FunctionArgument, FunctionCall, ToolInfo
 
 
 def symbol_generator():
-    """Yields symbols: 'A', 'B', ..., 'Z', 'AA', 'AB', ..."""
+    """Yields symbols: 'A', 'B', ..., 'Z', 'AA', 'AB', ... skipping 'X'"""
     i = 0
     while True:
         s = ""
         n = i
         while True:
             s = chr(ord("A") + (n % 26)) + s
+            if s == "X":
+                s = chr(ord("A") + ((n + 1) % 26)) + s[1:]  # skip 'X'
             n = n // 26 - 1
             if n < 0:
                 break
